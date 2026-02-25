@@ -1,0 +1,344 @@
+/* ------------------------------------------------------------------ */
+/* Reset & base (matches settings.css / style.css conventions)        */
+/* ------------------------------------------------------------------ */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+    font-family: "SF Mono", Monaco, Consolas, "Courier New", monospace;
+    font-size: 14px;
+    line-height: 1.6;
+    background: #fff;
+    color: #111;
+    min-height: 100vh;
+}
+
+/* ------------------------------------------------------------------ */
+/* Page layout                                                        */
+/* ------------------------------------------------------------------ */
+#tasks-page {
+    max-width: 640px;
+    padding: 1.5rem;
+}
+
+/* ------------------------------------------------------------------ */
+/* Header                                                             */
+/* ------------------------------------------------------------------ */
+.tasks-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1.5rem;
+    padding-bottom: 1rem;
+    border-bottom: 1px solid #eee;
+}
+
+.tasks-title {
+    font-size: 1rem;
+    font-weight: 600;
+    color: #111;
+}
+
+.tasks-nav {
+    display: flex;
+    gap: 1rem;
+}
+
+.nav-link {
+    color: #888;
+    text-decoration: none;
+    font-size: 0.75rem;
+}
+.nav-link:hover { color: #111; text-decoration: underline; }
+
+/* ------------------------------------------------------------------ */
+/* Toolbar — filters + brain dump                                     */
+/* ------------------------------------------------------------------ */
+.tasks-toolbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1.5rem;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+}
+
+.filter-group {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+.filter-btn {
+    background: none;
+    border: 1px solid #ddd;
+    padding: 0.25rem 0.5rem;
+    font-family: inherit;
+    font-size: 0.7rem;
+    cursor: pointer;
+    color: #666;
+}
+.filter-btn:hover { border-color: #111; color: #111; }
+.filter-btn.active { background: #111; color: #fff; border-color: #111; }
+
+.filter-select {
+    background: #fff;
+    border: 1px solid #ddd;
+    padding: 0.25rem 0.4rem;
+    font-family: inherit;
+    font-size: 0.7rem;
+    color: #666;
+    cursor: pointer;
+}
+.filter-select:focus { outline: none; border-color: #111; }
+
+.btn-dark {
+    padding: 0.35rem 0.75rem;
+    background: #111;
+    color: #fff;
+    border: none;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 0.75rem;
+}
+.btn-dark:hover { background: #333; }
+
+/* ------------------------------------------------------------------ */
+/* Task list                                                          */
+/* ------------------------------------------------------------------ */
+.task-list {
+    list-style: none;
+}
+
+.task-item {
+    padding: 0.75rem 0;
+    border-bottom: 1px solid #eee;
+    cursor: pointer;
+}
+.task-item:last-child { border-bottom: none; }
+.task-item:hover { background: #fafafa; }
+
+.task-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+}
+
+/* Urgency bar — thin vertical indicator */
+.urgency-bar {
+    width: 4px;
+    min-height: 28px;
+    border-radius: 2px;
+    flex-shrink: 0;
+    align-self: stretch;
+}
+.urgency-bar.low { background: #ddd; }
+.urgency-bar.medium { background: #e8a838; }
+.urgency-bar.high { background: #d44; }
+
+.task-main {
+    flex: 1;
+    min-width: 0;
+}
+
+.task-title-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 0.5rem;
+}
+
+.task-title {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: #111;
+}
+.task-item.completed .task-title {
+    text-decoration: line-through;
+    color: #888;
+}
+
+.task-urgency {
+    font-size: 0.65rem;
+    color: #888;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+.task-meta {
+    font-size: 0.7rem;
+    color: #888;
+    margin-top: 0.15rem;
+    display: flex;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+}
+
+.task-tag {
+    color: #999;
+}
+
+.task-due { color: #888; }
+.task-due.overdue { color: #d44; font-weight: 600; }
+.task-due.soon { color: #e8a838; }
+
+/* ------------------------------------------------------------------ */
+/* Task detail (expanded view)                                        */
+/* ------------------------------------------------------------------ */
+.task-detail {
+    display: none;
+    margin-top: 0.75rem;
+    padding: 0.75rem;
+    border: 1px solid #eee;
+    font-size: 0.8rem;
+}
+.task-item.expanded .task-detail { display: block; }
+
+.task-description {
+    font-family: 'Open Sans', Helvetica, Arial, sans-serif;
+    line-height: 1.5;
+    color: #444;
+    margin-bottom: 0.75rem;
+    white-space: pre-wrap;
+}
+
+.task-annotations {
+    margin-bottom: 0.75rem;
+}
+.annotation {
+    font-size: 0.75rem;
+    color: #666;
+    padding: 0.25rem 0;
+    border-bottom: 1px solid #f5f5f5;
+    font-family: 'Open Sans', Helvetica, Arial, sans-serif;
+}
+.annotation-time {
+    color: #aaa;
+    font-size: 0.65rem;
+}
+
+.task-actions {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+
+.text-btn {
+    background: none;
+    border: none;
+    color: #888;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 0.7rem;
+    padding: 0;
+}
+.text-btn:hover { color: #111; text-decoration: underline; }
+.text-btn.danger:hover { color: #d44; }
+
+/* ------------------------------------------------------------------ */
+/* Completed section                                                  */
+/* ------------------------------------------------------------------ */
+.completed-section {
+    margin-top: 2rem;
+    padding-top: 1rem;
+    border-top: 1px solid #eee;
+}
+
+.completed-header {
+    font-size: 0.7rem;
+    color: #888;
+    cursor: pointer;
+    user-select: none;
+    margin-bottom: 0.5rem;
+}
+.completed-header:hover { color: #111; }
+
+.completed-list {
+    list-style: none;
+}
+
+/* ------------------------------------------------------------------ */
+/* Add/edit task form (inline)                                        */
+/* ------------------------------------------------------------------ */
+.task-form {
+    padding: 1rem 0;
+    border-bottom: 1px solid #eee;
+    margin-bottom: 0.5rem;
+}
+
+.form-row {
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: 0.5rem;
+}
+
+.form-input {
+    background: #fff;
+    color: #111;
+    border: 1px solid #ddd;
+    padding: 0.35rem 0.5rem;
+    font-family: inherit;
+    font-size: 0.8rem;
+    flex: 1;
+}
+.form-input:focus { outline: none; border-color: #111; }
+.form-input::placeholder { color: #aaa; }
+
+.form-textarea {
+    width: 100%;
+    background: #fff;
+    color: #111;
+    border: 1px solid #ddd;
+    padding: 0.5rem;
+    font-family: 'Open Sans', Helvetica, Arial, sans-serif;
+    font-size: 0.8rem;
+    resize: vertical;
+    line-height: 1.5;
+    margin-bottom: 0.5rem;
+}
+.form-textarea:focus { outline: none; border-color: #111; }
+.form-textarea::placeholder { color: #aaa; }
+
+.form-select {
+    background: #fff;
+    border: 1px solid #ddd;
+    padding: 0.25rem 0.4rem;
+    font-family: inherit;
+    font-size: 0.75rem;
+    color: #666;
+}
+.form-select:focus { outline: none; border-color: #111; }
+
+.form-actions {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+}
+
+.form-label {
+    font-size: 0.65rem;
+    color: #888;
+    text-transform: lowercase;
+}
+
+/* ------------------------------------------------------------------ */
+/* Empty state                                                        */
+/* ------------------------------------------------------------------ */
+.empty-state {
+    text-align: center;
+    padding: 3rem 0;
+    color: #888;
+    font-size: 0.85rem;
+}
+
+/* ------------------------------------------------------------------ */
+/* Annotate inline form                                               */
+/* ------------------------------------------------------------------ */
+.annotate-form {
+    display: flex;
+    gap: 0.5rem;
+    margin-top: 0.5rem;
+}
+.annotate-form input {
+    flex: 1;
+}

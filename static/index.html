@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Claude Wrapper</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/style.css?v=7">
+</head>
+<body>
+    <div id="app">
+        <!-- Left sidebar -->
+        <aside id="sidebar">
+            <div class="sidebar-header">
+                <span class="sidebar-title" id="new-chat-btn" title="new conversation">claude</span>
+                <nav class="sidebar-nav">
+                    <a href="/tasks" class="text-btn">tasks</a>
+                    <a href="/couch" class="text-btn">couch</a>
+                    <a href="/settings" class="text-btn">settings</a>
+                </nav>
+            </div>
+            <div class="sidebar-section">
+                <div class="section-label">conversations</div>
+                <ul id="conversation-list"></ul>
+            </div>
+        </aside>
+
+        <!-- Main chat area -->
+        <main id="chat-area">
+            <!-- Welcome screen -->
+            <div id="welcome" class="welcome">
+                <div class="welcome-inner">
+                    <h2>claude</h2>
+                    <p>start a new conversation or pick one from the sidebar.</p>
+                </div>
+            </div>
+
+            <!-- Chat header -->
+            <div id="chat-header" class="chat-header" style="display:none;">
+                <div class="chat-header-left">
+                    <select id="model-select" class="select-minimal"></select>
+                    <select id="prompt-select" class="select-minimal"></select>
+                </div>
+                <div class="chat-header-right">
+                    <label class="thinking-toggle">
+                        <input type="checkbox" id="thinking-checkbox">
+                        <span>thinking</span>
+                    </label>
+                    <span id="cost-display" class="cost-display">0 tokens | $0.0000</span>
+                </div>
+            </div>
+
+            <!-- Messages -->
+            <div id="messages" class="messages" style="display:none;"></div>
+
+            <!-- Input area -->
+            <div id="input-area" class="input-area" style="display:none;">
+                <div class="input-wrapper">
+                    <textarea id="message-input" placeholder="message..." rows="1"></textarea>
+                    <div class="input-actions">
+                        <span id="input-status" class="input-status"></span>
+                        <button id="send-btn" class="send-btn">send</button>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <!-- Right tree panel -->
+        <aside id="tree-panel" class="tree-panel" style="display:none;">
+            <div class="section-label" style="padding:1rem 1rem 0.5rem;">tree</div>
+            <div id="tree-search-container" class="tree-search-container">
+                <input id="tree-search" class="tree-search" type="text" placeholder="search...">
+            </div>
+            <div id="node-map" class="node-map"></div>
+        </aside>
+
+    </div>
+    <script src="/app.js?v=7"></script>
+</body>
+</html>

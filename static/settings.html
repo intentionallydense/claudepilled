@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>settings</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/settings.css">
+</head>
+<body>
+    <div id="settings-page">
+        <header class="settings-header">
+            <h1 class="settings-title">settings</h1>
+            <nav class="settings-nav">
+                <a href="/" class="nav-link">chat</a>
+                <a href="/tasks" class="nav-link">tasks</a>
+                <a href="/couch" class="nav-link">couch</a>
+            </nav>
+        </header>
+        <form id="settings-form" autocomplete="off">
+            <label class="form-label" for="default-model">default model</label>
+            <select id="default-model" class="form-select"></select>
+
+            <label class="form-label" for="default-system-prompt">universal prompt</label>
+            <textarea id="default-system-prompt" class="form-textarea" rows="6" placeholder="always prepended to every conversation..."></textarea>
+
+            <div class="form-actions">
+                <button type="submit" class="btn-dark">save</button>
+                <span id="save-status" class="save-status"></span>
+            </div>
+        </form>
+
+        <section class="prompts-section">
+            <h2 class="section-heading">saved prompts</h2>
+            <div id="prompts-list" class="prompts-list"></div>
+            <div class="prompts-add">
+                <input id="new-prompt-name" class="form-input" placeholder="prompt name..." />
+                <textarea id="new-prompt-content" class="form-textarea" rows="3" placeholder="prompt content..."></textarea>
+                <button id="add-prompt-btn" class="btn-dark" type="button">add prompt</button>
+            </div>
+        </section>
+    </div>
+    <script src="/settings.js"></script>
+</body>
+</html>

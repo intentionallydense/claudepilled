@@ -1,0 +1,559 @@
+"""SQLite persistence layer for conversations and messages."""
+
+from __future__ import annotations
+
+import json
+import os
+import sqlite3
+from datetime import datetime, timezone
+from pathlib import Path
+
+from claude_wrapper.models import Conversation, ContentBlock, Message
+
+DEFAULT_DB_PATH = os.path.join(str(Path.home()), ".claude-wrapper", "data.db")
+
+
+class Database:
+    """Simple SQLite store for conversations and messages."""
+
+    def __init__(self, db_path: str = DEFAULT_DB_PATH):
+        os.makedirs(os.path.dirname(db_path), exist_ok=True)
+        self.db_path = db_path
+        self._init_tables()
+
+    def _connect(self) -> sqlite3.Connection:
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL")
+        return conn
+
+    def _init_tables(self) -> None:
+        conn = self._connect()
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS conversations (
+                id TEXT PRIMARY KEY,
+                title TEXT NOT NULL DEFAULT 'New conversation',
+                system_prompt TEXT NOT NULL DEFAULT '',
+                model TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS messages (
+                id TEXT PRIMARY KEY,
+                conversation_id TEXT NOT NULL,
+                role TEXT NOT NULL,
+                content TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS idx_messages_conv
+                ON messages(conversation_id, created_at);
+            CREATE TABLE IF NOT EXISTS settings (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS prompts (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                content TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL
+            );
+        """)
+        conn.commit()
+
+        # Migrations — idempotent column additions
+        conv_migrations = [
+            ("total_input_tokens", "INTEGER", "0"),
+            ("total_output_tokens", "INTEGER", "0"),
+            ("total_cost", "REAL", "0.0"),
+            ("current_leaf_id", "TEXT", "NULL"),
+            ("type", "TEXT", "'chat'"),
+            ("metadata", "TEXT", "NULL"),
+            ("prompt_id", "TEXT", "NULL"),
+        ]
+        for col, col_type, default in conv_migrations:
+            try:
+                conn.execute(f"ALTER TABLE conversations ADD COLUMN {col} {col_type} DEFAULT {default}")
+            except sqlite3.OperationalError:
+                pass
+
+        msg_migrations = [
+            ("input_tokens", "INTEGER", "0"),
+            ("output_tokens", "INTEGER", "0"),
+            ("cost", "REAL", "0.0"),
+            ("parent_id", "TEXT", "NULL"),
+            ("speaker", "TEXT", "NULL"),
+        ]
+        for col, col_type, default in msg_migrations:
+            try:
+                conn.execute(f"ALTER TABLE messages ADD COLUMN {col} {col_type} DEFAULT {default}")
+            except sqlite3.OperationalError:
+                pass
+
+        conn.commit()
+
+        # Backfill parent_id for existing messages that lack them
+        self._backfill_parent_ids(conn)
+
+        conn.close()
+
+    def _backfill_parent_ids(self, conn: sqlite3.Connection) -> None:
+        """Set parent_id on existing messages based on creation order."""
+        rows = conn.execute(
+            "SELECT id, conversation_id FROM messages WHERE parent_id IS NULL ORDER BY conversation_id, created_at"
+        ).fetchall()
+        if not rows:
+            return
+
+        prev_by_conv: dict[str, str] = {}
+        for row in rows:
+            msg_id = row["id"]
+            conv_id = row["conversation_id"]
+            parent = prev_by_conv.get(conv_id)
+            if parent:
+                conn.execute("UPDATE messages SET parent_id = ? WHERE id = ?", (parent, msg_id))
+            prev_by_conv[conv_id] = msg_id
+
+        # Also backfill current_leaf_id for conversations that lack it
+        conn.execute("""
+            UPDATE conversations SET current_leaf_id = (
+                SELECT id FROM messages
+                WHERE conversation_id = conversations.id
+                ORDER BY created_at DESC LIMIT 1
+            ) WHERE current_leaf_id IS NULL
+        """)
+        conn.commit()
+
+    # ------------------------------------------------------------------
+    # Conversations
+    # ------------------------------------------------------------------
+
+    def save_conversation(self, conv: Conversation, conv_type: str = "chat", metadata: str | None = None) -> None:
+        conn = self._connect()
+        conn.execute(
+            """INSERT OR REPLACE INTO conversations
+               (id, title, system_prompt, model, created_at, updated_at,
+                total_input_tokens, total_output_tokens, total_cost, current_leaf_id,
+                type, metadata, prompt_id)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                conv.id,
+                conv.title,
+                conv.system_prompt,
+                conv.model,
+                conv.created_at.isoformat(),
+                conv.updated_at.isoformat(),
+                conv.total_input_tokens,
+                conv.total_output_tokens,
+                conv.total_cost,
+                conv.current_leaf_id,
+                conv_type,
+                metadata,
+                conv.prompt_id,
+            ),
+        )
+        conn.commit()
+        conn.close()
+
+    def load_conversation(self, conversation_id: str) -> Conversation | None:
+        conn = self._connect()
+        row = conn.execute(
+            "SELECT * FROM conversations WHERE id = ?", (conversation_id,)
+        ).fetchone()
+        if row is None:
+            conn.close()
+            return None
+
+        keys = row.keys()
+        leaf_id = row["current_leaf_id"] if "current_leaf_id" in keys else None
+
+        # Load messages along the current path (root to leaf)
+        if leaf_id:
+            messages = self._load_path(conn, conversation_id, leaf_id)
+        else:
+            messages = self._load_messages(conn, conversation_id)
+
+        conn.close()
+        return Conversation(
+            id=row["id"],
+            title=row["title"],
+            system_prompt=row["system_prompt"],
+            model=row["model"],
+            messages=messages,
+            created_at=datetime.fromisoformat(row["created_at"]),
+            updated_at=datetime.fromisoformat(row["updated_at"]),
+            current_leaf_id=leaf_id,
+            total_input_tokens=row["total_input_tokens"] if "total_input_tokens" in keys else 0,
+            total_output_tokens=row["total_output_tokens"] if "total_output_tokens" in keys else 0,
+            total_cost=row["total_cost"] if "total_cost" in keys else 0.0,
+            prompt_id=row["prompt_id"] if "prompt_id" in keys else None,
+        )
+
+    def list_conversations(self) -> list[dict]:
+        conn = self._connect()
+        rows = conn.execute(
+            """SELECT id, title, model, created_at, updated_at,
+                      total_input_tokens, total_output_tokens, total_cost
+               FROM conversations
+               WHERE COALESCE(type, 'chat') = 'chat'
+               ORDER BY updated_at DESC"""
+        ).fetchall()
+        conn.close()
+        return [dict(row) for row in rows]
+
+    def list_conversations_by_type(self, conv_type: str) -> list[dict]:
+        conn = self._connect()
+        rows = conn.execute(
+            """SELECT id, title, model, created_at, updated_at,
+                      total_input_tokens, total_output_tokens, total_cost,
+                      metadata
+               FROM conversations
+               WHERE type = ?
+               ORDER BY updated_at DESC""",
+            (conv_type,),
+        ).fetchall()
+        conn.close()
+        return [dict(row) for row in rows]
+
+    def get_conversation_metadata(self, conversation_id: str) -> dict | None:
+        conn = self._connect()
+        row = conn.execute(
+            "SELECT metadata FROM conversations WHERE id = ?", (conversation_id,)
+        ).fetchone()
+        conn.close()
+        if row is None or row["metadata"] is None:
+            return None
+        return json.loads(row["metadata"])
+
+    def delete_conversation(self, conversation_id: str) -> None:
+        conn = self._connect()
+        conn.execute("DELETE FROM messages WHERE conversation_id = ?", (conversation_id,))
+        conn.execute("DELETE FROM conversations WHERE id = ?", (conversation_id,))
+        conn.commit()
+        conn.close()
+
+    def update_conversation_title(self, conversation_id: str, title: str) -> None:
+        conn = self._connect()
+        now = datetime.now(timezone.utc).isoformat()
+        conn.execute(
+            "UPDATE conversations SET title = ?, updated_at = ? WHERE id = ?",
+            (title, now, conversation_id),
+        )
+        conn.commit()
+        conn.close()
+
+    def update_conversation_model(self, conversation_id: str, model: str) -> None:
+        conn = self._connect()
+        now = datetime.now(timezone.utc).isoformat()
+        conn.execute(
+            "UPDATE conversations SET model = ?, updated_at = ? WHERE id = ?",
+            (model, now, conversation_id),
+        )
+        conn.commit()
+        conn.close()
+
+    def update_conversation_system_prompt(self, conversation_id: str, system_prompt: str) -> None:
+        conn = self._connect()
+        now = datetime.now(timezone.utc).isoformat()
+        conn.execute(
+            "UPDATE conversations SET system_prompt = ?, updated_at = ? WHERE id = ?",
+            (system_prompt, now, conversation_id),
+        )
+        conn.commit()
+        conn.close()
+
+    def update_conversation_prompt_id(self, conversation_id: str, prompt_id: str | None) -> None:
+        conn = self._connect()
+        now = datetime.now(timezone.utc).isoformat()
+        conn.execute(
+            "UPDATE conversations SET prompt_id = ?, updated_at = ? WHERE id = ?",
+            (prompt_id, now, conversation_id),
+        )
+        conn.commit()
+        conn.close()
+
+    def touch_conversation(self, conversation_id: str) -> None:
+        conn = self._connect()
+        now = datetime.now(timezone.utc).isoformat()
+        conn.execute(
+            "UPDATE conversations SET updated_at = ? WHERE id = ?",
+            (now, conversation_id),
+        )
+        conn.commit()
+        conn.close()
+
+    def get_conversation_cost(self, conversation_id: str) -> dict:
+        conn = self._connect()
+        row = conn.execute(
+            "SELECT total_input_tokens, total_output_tokens, total_cost FROM conversations WHERE id = ?",
+            (conversation_id,),
+        ).fetchone()
+        conn.close()
+        if row is None:
+            return {"input_tokens": 0, "output_tokens": 0, "cost": 0.0}
+        return {
+            "input_tokens": row["total_input_tokens"],
+            "output_tokens": row["total_output_tokens"],
+            "cost": row["total_cost"],
+        }
+
+    def set_current_leaf(self, conversation_id: str, leaf_id: str) -> None:
+        conn = self._connect()
+        now = datetime.now(timezone.utc).isoformat()
+        conn.execute(
+            "UPDATE conversations SET current_leaf_id = ?, updated_at = ? WHERE id = ?",
+            (leaf_id, now, conversation_id),
+        )
+        conn.commit()
+        conn.close()
+
+    # ------------------------------------------------------------------
+    # Messages
+    # ------------------------------------------------------------------
+
+    def save_message(
+        self,
+        conversation_id: str,
+        msg: Message,
+        input_tokens: int = 0,
+        output_tokens: int = 0,
+        cost: float = 0.0,
+        speaker: str | None = None,
+    ) -> None:
+        content_json = self._serialize_content(msg.content)
+        conn = self._connect()
+        conn.execute(
+            """INSERT OR REPLACE INTO messages
+               (id, conversation_id, role, content, created_at, input_tokens, output_tokens, cost, parent_id, speaker)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                msg.id,
+                conversation_id,
+                msg.role,
+                content_json,
+                msg.created_at.isoformat(),
+                input_tokens,
+                output_tokens,
+                cost,
+                msg.parent_id,
+                speaker or msg.speaker,
+            ),
+        )
+        # Update current_leaf_id and accumulate totals
+        now = datetime.now(timezone.utc).isoformat()
+        conn.execute(
+            """UPDATE conversations
+               SET total_input_tokens = total_input_tokens + ?,
+                   total_output_tokens = total_output_tokens + ?,
+                   total_cost = total_cost + ?,
+                   current_leaf_id = ?,
+                   updated_at = ?
+               WHERE id = ?""",
+            (input_tokens, output_tokens, cost, msg.id, now, conversation_id),
+        )
+        conn.commit()
+        conn.close()
+
+    # ------------------------------------------------------------------
+    # Tree operations
+    # ------------------------------------------------------------------
+
+    def get_tree(self, conversation_id: str) -> dict:
+        """Return all messages as a tree structure with the current path."""
+        conn = self._connect()
+        rows = conn.execute(
+            "SELECT id, role, content, parent_id, created_at FROM messages WHERE conversation_id = ? ORDER BY created_at",
+            (conversation_id,),
+        ).fetchall()
+
+        conv_row = conn.execute(
+            "SELECT current_leaf_id FROM conversations WHERE id = ?",
+            (conversation_id,),
+        ).fetchone()
+        conn.close()
+
+        leaf_id = conv_row["current_leaf_id"] if conv_row else None
+        current_path = self._compute_path_ids(rows, leaf_id) if leaf_id else []
+
+        nodes = []
+        for row in rows:
+            raw = json.loads(row["content"])
+            if isinstance(raw, dict) and raw.get("type") == "text":
+                preview = raw["value"][:80]
+            elif isinstance(raw, list):
+                text_parts = [b.get("text", "") for b in raw if b.get("type") == "text" and b.get("text")]
+                preview = "".join(text_parts)[:80]
+            else:
+                preview = str(raw)[:80]
+            nodes.append({
+                "id": row["id"],
+                "role": row["role"],
+                "parent_id": row["parent_id"],
+                "preview": preview,
+            })
+
+        return {"nodes": nodes, "current_path": current_path}
+
+    def get_path(self, conversation_id: str, leaf_id: str) -> list[str]:
+        """Return ordered message IDs from root to the given leaf."""
+        conn = self._connect()
+        rows = conn.execute(
+            "SELECT id, parent_id FROM messages WHERE conversation_id = ?",
+            (conversation_id,),
+        ).fetchall()
+        conn.close()
+        return self._compute_path_ids(rows, leaf_id)
+
+    def _load_path(self, conn: sqlite3.Connection, conversation_id: str, leaf_id: str) -> list[Message]:
+        """Load messages along the path from root to leaf."""
+        rows = conn.execute(
+            "SELECT id, parent_id FROM messages WHERE conversation_id = ?",
+            (conversation_id,),
+        ).fetchall()
+        path_ids = self._compute_path_ids(rows, leaf_id)
+        if not path_ids:
+            return self._load_messages(conn, conversation_id)
+
+        # Load messages in path order
+        placeholders = ",".join("?" * len(path_ids))
+        msg_rows = conn.execute(
+            f"SELECT * FROM messages WHERE id IN ({placeholders})",
+            path_ids,
+        ).fetchall()
+        msg_map = {r["id"]: r for r in msg_rows}
+        return [self._row_to_message(msg_map[mid]) for mid in path_ids if mid in msg_map]
+
+    @staticmethod
+    def _compute_path_ids(rows, leaf_id: str) -> list[str]:
+        """Walk parent pointers from leaf to root, return root-to-leaf order."""
+        parent_map = {r["id"]: r["parent_id"] for r in rows}
+        path = []
+        current = leaf_id
+        seen = set()
+        while current and current in parent_map and current not in seen:
+            seen.add(current)
+            path.append(current)
+            current = parent_map[current]
+        path.reverse()
+        return path
+
+    def find_leaf(self, conversation_id: str, node_id: str) -> str:
+        """Find the deepest descendant of a node (following first children)."""
+        conn = self._connect()
+        rows = conn.execute(
+            "SELECT id, parent_id FROM messages WHERE conversation_id = ? ORDER BY created_at",
+            (conversation_id,),
+        ).fetchall()
+        conn.close()
+
+        # Build children map
+        children: dict[str, list[str]] = {}
+        for row in rows:
+            pid = row["parent_id"]
+            if pid:
+                children.setdefault(pid, []).append(row["id"])
+
+        # Walk down following first child
+        current = node_id
+        while current in children and children[current]:
+            current = children[current][0]
+        return current
+
+    def _load_messages(self, conn: sqlite3.Connection, conversation_id: str) -> list[Message]:
+        rows = conn.execute(
+            "SELECT * FROM messages WHERE conversation_id = ? ORDER BY created_at",
+            (conversation_id,),
+        ).fetchall()
+        return [self._row_to_message(row) for row in rows]
+
+    # ------------------------------------------------------------------
+    # Settings
+    # ------------------------------------------------------------------
+
+    def get_setting(self, key: str) -> str | None:
+        conn = self._connect()
+        row = conn.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
+        conn.close()
+        return row["value"] if row else None
+
+    def set_setting(self, key: str, value: str) -> None:
+        conn = self._connect()
+        conn.execute(
+            "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)",
+            (key, value),
+        )
+        conn.commit()
+        conn.close()
+
+    def get_all_settings(self) -> dict[str, str]:
+        conn = self._connect()
+        rows = conn.execute("SELECT key, value FROM settings").fetchall()
+        conn.close()
+        return {row["key"]: row["value"] for row in rows}
+
+    # ------------------------------------------------------------------
+    # Prompts library
+    # ------------------------------------------------------------------
+
+    def list_prompts(self) -> list[dict]:
+        conn = self._connect()
+        rows = conn.execute(
+            "SELECT id, name, content, created_at FROM prompts ORDER BY name"
+        ).fetchall()
+        conn.close()
+        return [dict(row) for row in rows]
+
+    def get_prompt(self, prompt_id: str) -> dict | None:
+        conn = self._connect()
+        row = conn.execute(
+            "SELECT id, name, content, created_at FROM prompts WHERE id = ?",
+            (prompt_id,),
+        ).fetchone()
+        conn.close()
+        return dict(row) if row else None
+
+    def save_prompt(self, prompt_id: str, name: str, content: str) -> dict:
+        conn = self._connect()
+        now = datetime.now(timezone.utc).isoformat()
+        conn.execute(
+            "INSERT OR REPLACE INTO prompts (id, name, content, created_at) VALUES (?, ?, ?, ?)",
+            (prompt_id, name, content, now),
+        )
+        conn.commit()
+        conn.close()
+        return {"id": prompt_id, "name": name, "content": content, "created_at": now}
+
+    def delete_prompt(self, prompt_id: str) -> None:
+        conn = self._connect()
+        conn.execute("DELETE FROM prompts WHERE id = ?", (prompt_id,))
+        conn.commit()
+        conn.close()
+
+    # ------------------------------------------------------------------
+    # Serialization helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _serialize_content(content: str | list[ContentBlock]) -> str:
+        if isinstance(content, str):
+            return json.dumps({"type": "text", "value": content})
+        return json.dumps([block.model_dump(exclude_none=True) for block in content])
+
+    @staticmethod
+    def _row_to_message(row) -> Message:
+        raw = json.loads(row["content"])
+        if isinstance(raw, dict) and raw.get("type") == "text":
+            content = raw["value"]
+        elif isinstance(raw, list):
+            content = [ContentBlock(**block) for block in raw]
+        else:
+            content = str(raw)
+        keys = row.keys()
+        return Message(
+            id=row["id"],
+            role=row["role"],
+            content=content,
+            parent_id=row["parent_id"] if "parent_id" in keys else None,
+            speaker=row["speaker"] if "speaker" in keys else None,
+            created_at=datetime.fromisoformat(row["created_at"]),
+        )

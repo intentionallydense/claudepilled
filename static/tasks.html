@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>tasks</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/tasks.css">
+</head>
+<body>
+    <div id="tasks-page">
+        <header class="tasks-header">
+            <h1 class="tasks-title">tasks</h1>
+            <nav class="tasks-nav">
+                <a href="/" class="nav-link">chat</a>
+                <a href="/couch" class="nav-link">couch</a>
+                <a href="/settings" class="nav-link">settings</a>
+            </nav>
+        </header>
+
+        <div class="tasks-toolbar">
+            <div class="filter-group">
+                <button class="filter-btn active" data-filter="all">all</button>
+                <button class="filter-btn" data-filter="active">active</button>
+                <button class="filter-btn" data-filter="waiting">waiting</button>
+                <select id="project-filter" class="filter-select">
+                    <option value="">project</option>
+                </select>
+                <select id="tag-filter" class="filter-select">
+                    <option value="">tag</option>
+                </select>
+            </div>
+            <div style="display:flex;gap:0.5rem;">
+                <button id="add-task-btn" class="btn-dark">+ add</button>
+                <button id="brain-dump-btn" class="btn-dark">brain dump</button>
+            </div>
+        </div>
+
+        <!-- Inline add form (hidden by default) -->
+        <div id="add-form" class="task-form" style="display:none;">
+            <div class="form-row">
+                <input id="new-title" class="form-input" placeholder="task title..." />
+                <select id="new-priority" class="form-select">
+                    <option value="">priority</option>
+                    <option value="H">high</option>
+                    <option value="M">medium</option>
+                    <option value="L">low</option>
+                </select>
+            </div>
+            <textarea id="new-description" class="form-textarea" rows="2" placeholder="description (optional)..."></textarea>
+            <div class="form-row">
+                <input id="new-project" class="form-input" placeholder="project..." />
+                <input id="new-tags" class="form-input" placeholder="tags (comma separated)..." />
+                <input id="new-due" class="form-input" type="datetime-local" />
+            </div>
+            <div class="form-actions">
+                <button id="save-task-btn" class="btn-dark">save</button>
+                <button id="cancel-task-btn" class="text-btn">cancel</button>
+            </div>
+        </div>
+
+        <!-- Task list -->
+        <ul id="task-list" class="task-list"></ul>
+
+        <!-- Empty state -->
+        <div id="empty-state" class="empty-state" style="display:none;">
+            no tasks yet. add one or use brain dump to get started.
+        </div>
+
+        <!-- Completed today section -->
+        <div id="completed-section" class="completed-section" style="display:none;">
+            <div class="completed-header" id="completed-toggle">completed</div>
+            <ul id="completed-list" class="completed-list"></ul>
+        </div>
+    </div>
+    <script src="/tasks.js"></script>
+</body>
+</html>
