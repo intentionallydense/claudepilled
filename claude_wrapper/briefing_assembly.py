@@ -187,6 +187,5 @@ def cli_main() -> None:
     briefing_db = BriefingDatabase(db)
     init_all_series(briefing_db)
 
-    # Force=False means it won't re-assemble if already done today
-    result = assemble_briefing(briefing_db, task_db, client, force=False)
+    result = assemble_briefing(briefing_db, task_db, client, force=True)
     print(result["assembled_text"])

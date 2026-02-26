@@ -205,6 +205,7 @@ async function loadProgress() {
                     : `<button class="text-btn" onclick="togglePause('${p.series}', true)">pause</button>`
                 }
                 <button class="text-btn" onclick="skipItem('${p.series}')">skip</button>
+                <button class="text-btn" onclick="markUnread('${p.series}')">didn't read</button>
             </div>
         `;
         list.appendChild(li);
@@ -219,6 +220,11 @@ async function togglePause(series, pause) {
 
 async function skipItem(series) {
     await api("POST", `/api/reading-progress/${series}/skip`);
+    await loadProgress();
+}
+
+async function markUnread(series) {
+    await api("POST", `/api/reading-progress/${series}/unread`);
     await loadProgress();
 }
 

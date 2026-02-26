@@ -155,6 +155,24 @@ class BriefingDatabase:
         conn.close()
         return self.get_progress(series)
 
+    def mark_unread(self, series: str) -> dict | None:
+        """Rewind pointer by one so the same item re-appears tomorrow."""
+        progress = self.get_progress(series)
+        if progress is None:
+            return None
+
+        new_index = max(0, progress["current_index"] - 1)
+        conn = self._connect()
+        conn.execute(
+            """UPDATE reading_progress
+               SET current_index = ?
+               WHERE series = ?""",
+            (new_index, series),
+        )
+        conn.commit()
+        conn.close()
+        return self.get_progress(series)
+
     def skip_item(self, series: str) -> dict | None:
         """Advance pointer unconditionally (ignores daily idempotency)."""
         progress = self.get_progress(series)

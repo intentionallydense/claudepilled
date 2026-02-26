@@ -104,6 +104,15 @@ async def skip_series_item(series: str):
     return result
 
 
+@progress_router.post("/{series}/unread")
+async def mark_series_unread(series: str):
+    """Mark current item as not read — it will re-appear tomorrow."""
+    result = briefing_db.mark_unread(series)
+    if result is None:
+        return JSONResponse(status_code=404, content={"error": "Unknown series"})
+    return result
+
+
 # ------------------------------------------------------------------
 # Anki router — /api/anki
 # ------------------------------------------------------------------
