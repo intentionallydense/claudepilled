@@ -157,6 +157,9 @@ class ConversationManager:
                 system=effective_system,
                 thinking_budget=thinking_budget,
             ):
+                # Don't forward MESSAGE_DONE from inner stream — we emit our own
+                if event.type == StreamEventType.MESSAGE_DONE:
+                    continue
                 yield event
 
                 if event.type == StreamEventType.TEXT_DELTA and event.text:
@@ -183,8 +186,6 @@ class ConversationManager:
                         message_input_tokens = event.input_tokens
                     if event.output_tokens:
                         message_output_tokens = event.output_tokens
-
-                # WEB_SEARCH_START / WEB_SEARCH_RESULT just pass through (already yielded)
 
             # Build the assistant message
             if thinking_parts:
@@ -308,6 +309,9 @@ class ConversationManager:
                 system=effective_system,
                 thinking_budget=thinking_budget,
             ):
+                # Don't forward MESSAGE_DONE from inner stream — we emit our own
+                if event.type == StreamEventType.MESSAGE_DONE:
+                    continue
                 yield event
 
                 if event.type == StreamEventType.TEXT_DELTA and event.text:

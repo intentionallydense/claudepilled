@@ -50,12 +50,13 @@ body {
     cursor: pointer;
     user-select: none;
 }
-.sidebar-title:hover { text-decoration: underline; }
-
 .sidebar-nav {
     display: flex;
-    gap: 0.5rem;
+    flex-direction: column;
+    gap: 0.15rem;
 }
+.sidebar-nav .text-btn { text-decoration: none; }
+.sidebar-nav .text-btn:hover { text-decoration: none; }
 
 .sidebar-section {
     padding: 1rem;
@@ -488,7 +489,8 @@ body {
 
 .node-map {
     flex: 1;
-    overflow-y: auto;
+    overflow-y: scroll;
+    overflow-x: hidden;
     padding: 0.5rem 1rem 1rem;
     position: relative;
 }
@@ -527,24 +529,6 @@ body {
 }
 .tree-node.scroll-highlight {
     box-shadow: 0 0 0 2px #fff, 0 0 0 4px #888;
-}
-
-.tree-node-tooltip {
-    position: absolute;
-    background: #111;
-    color: #fff;
-    padding: 0.2rem 0.4rem;
-    font-size: 0.6rem;
-    white-space: nowrap;
-    max-width: 160px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    pointer-events: none;
-    z-index: 10;
-    right: 100%;
-    top: 50%;
-    transform: translateY(-50%);
-    margin-right: 8px;
 }
 
 /* ------------------------------------------------------------------ */

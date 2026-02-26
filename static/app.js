@@ -644,17 +644,35 @@ function buildTree() {
     const nodes = treeData.nodes;
     const currentPath = new Set(treeData.current_path || []);
 
-    // Build children map
+    // Build children map, skipping tool_result nodes (user role + empty preview).
+    // Their children get re-parented to the tool_result node's parent.
+    const toolResultIds = new Set();
+    const parentOf = {};
+    for (const n of nodes) {
+        parentOf[n.id] = n.parent_id;
+        if (n.role === "user" && n.parent_id && !n.preview) {
+            toolResultIds.add(n.id);
+        }
+    }
+
     const childrenMap = {};
     const nodeById = {};
     let rootId = null;
     for (const n of nodes) {
+        if (toolResultIds.has(n.id)) continue;  // skip tool_result nodes
         nodeById[n.id] = n;
-        if (!n.parent_id) {
+
+        // Re-parent if our parent was a tool_result node
+        let pid = n.parent_id;
+        while (pid && toolResultIds.has(pid)) {
+            pid = parentOf[pid];
+        }
+
+        if (!pid) {
             rootId = n.id;
         } else {
-            if (!childrenMap[n.parent_id]) childrenMap[n.parent_id] = [];
-            childrenMap[n.parent_id].push(n.id);
+            if (!childrenMap[pid]) childrenMap[pid] = [];
+            childrenMap[pid].push(n.id);
         }
     }
 
@@ -691,14 +709,15 @@ function buildTree() {
 
     dfs(rootId, 0, 0);
 
-    // Render
+    // Render — use depth for Y so branch siblings share a row
     const layerGap = 28;
     const colGap = 24;
     const startY = 16;
     const baseX = 40;
     const nodeRadius = { user: 6, assistant: 4 };
 
-    const totalHeight = startY + layout.length * layerGap + 20;
+    const maxDepth = Math.max(...layout.map(n => n.depth));
+    const totalHeight = startY + (maxDepth + 1) * layerGap + 20;
     const totalWidth = baseX + (maxCol + 1) * colGap + 40;
     nodeMap.style.minHeight = totalHeight + "px";
 
@@ -710,11 +729,11 @@ function buildTree() {
     svg.style.left = "0";
     nodeMap.appendChild(svg);
 
-    // Position map
+    // Position map — Y from depth, X from column
     const posMap = {};
-    layout.forEach((item, i) => {
+    layout.forEach((item) => {
         const x = baseX + item.col * colGap;
-        const y = startY + i * layerGap;
+        const y = startY + item.depth * layerGap;
         posMap[item.id] = { x, y };
     });
 
@@ -747,14 +766,9 @@ function buildTree() {
 
         node.style.left = (pos.x - r) + "px";
         node.style.top = (pos.y - r) + "px";
-        node.title = item.preview || `(${item.role})`;
 
         // Click to navigate
         node.onclick = () => navigateToNode(item.id);
-
-        // Hover tooltip
-        node.onmouseenter = () => showNodeTooltip(node, item.preview || `(${item.role})`);
-        node.onmouseleave = () => hideNodeTooltip();
 
         nodeMap.appendChild(node);
         treeNodes.push({ id: item.id, index: i, role: item.role, preview: item.preview, x: pos.x, y: pos.y, el: node, onPath: item.onPath });
@@ -812,21 +826,6 @@ function highlightTreeNode(index) {
     if (treeNodes[index]) {
         treeNodes[index].el.classList.add("scroll-highlight");
         currentHighlight = index;
-    }
-}
-
-let tooltipEl = null;
-function showNodeTooltip(node, text) {
-    hideNodeTooltip();
-    tooltipEl = document.createElement("div");
-    tooltipEl.className = "tree-node-tooltip";
-    tooltipEl.textContent = text;
-    node.appendChild(tooltipEl);
-}
-function hideNodeTooltip() {
-    if (tooltipEl) {
-        tooltipEl.remove();
-        tooltipEl = null;
     }
 }
 

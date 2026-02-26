@@ -14,6 +14,7 @@ dependencies = [
     "python-dotenv>=1.0.0",
     "pydantic>=2.0.0",
     "websockets>=13.0",
+    "feedparser>=6.0.0",
 ]
 
 [project.optional-dependencies]
@@ -28,3 +29,4 @@ packages = ["claude_wrapper"]
 
 [project.scripts]
 claude-wrapper = "claude_wrapper.server:main"
+claude-wrapper-briefing = "claude_wrapper.briefing_assembly:cli_main"

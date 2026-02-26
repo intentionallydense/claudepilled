@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>briefing</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/briefing.css">
+</head>
+<body>
+    <div id="briefing-page">
+        <header class="briefing-header">
+            <h1 class="briefing-title">briefing</h1>
+            <nav class="briefing-nav">
+                <a href="/" class="nav-link">chat</a>
+                <a href="/tasks" class="nav-link">tasks</a>
+                <a href="/couch" class="nav-link">couch</a>
+                <a href="/settings" class="nav-link">settings</a>
+            </nav>
+        </header>
+
+        <!-- Date navigation -->
+        <div class="date-bar">
+            <button id="prev-date" class="date-nav-btn">&larr; prev</button>
+            <span id="date-display" class="date-display"></span>
+            <div style="display:flex;gap:0.5rem;">
+                <button id="assemble-btn" class="btn-dark">assemble</button>
+                <button id="next-date" class="date-nav-btn">next &rarr;</button>
+            </div>
+        </div>
+
+        <!-- Loading state -->
+        <div id="loading-state" class="loading-state" style="display:none;">
+            <span class="loading-spinner">&#x25e0;</span> loading...
+        </div>
+
+        <!-- Empty state -->
+        <div id="empty-state" class="empty-state" style="display:none;">
+            no briefing for this date.<br>
+            click "assemble" to generate today's briefing.
+        </div>
+
+        <!-- Assembling state -->
+        <div id="assembling-state" class="loading-state" style="display:none;">
+            <span class="loading-spinner">&#x25e0;</span> assembling briefing — fetching feeds, reading lists, calling claude...
+        </div>
+
+        <!-- Briefing content -->
+        <div id="briefing-content" class="briefing-content" style="display:none;"></div>
+
+        <!-- Reading progress panel -->
+        <div id="progress-panel" class="progress-panel">
+            <div class="progress-title">reading progress</div>
+            <ul id="progress-list" class="progress-list"></ul>
+        </div>
+    </div>
+    <script src="/briefing.js"></script>
+</body>
+</html>

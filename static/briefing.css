@@ -1,0 +1,249 @@
+/* ------------------------------------------------------------------ */
+/* Reset & base — matches tasks.css conventions                       */
+/* ------------------------------------------------------------------ */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+    font-family: "SF Mono", Monaco, Consolas, "Courier New", monospace;
+    font-size: 14px;
+    line-height: 1.6;
+    background: #fff;
+    color: #111;
+    min-height: 100vh;
+}
+
+/* ------------------------------------------------------------------ */
+/* Page layout                                                        */
+/* ------------------------------------------------------------------ */
+#briefing-page {
+    max-width: 640px;
+    padding: 1.5rem;
+}
+
+/* ------------------------------------------------------------------ */
+/* Header                                                             */
+/* ------------------------------------------------------------------ */
+.briefing-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1.5rem;
+    padding-bottom: 1rem;
+    border-bottom: 1px solid #eee;
+}
+
+.briefing-title {
+    font-size: 1rem;
+    font-weight: 600;
+    color: #111;
+}
+
+.briefing-nav {
+    display: flex;
+    gap: 1rem;
+}
+
+.nav-link {
+    color: #888;
+    text-decoration: none;
+    font-size: 0.75rem;
+}
+.nav-link:hover { color: #111; text-decoration: underline; }
+
+/* ------------------------------------------------------------------ */
+/* Date navigation bar                                                */
+/* ------------------------------------------------------------------ */
+.date-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 1.5rem;
+    padding: 0.5rem 0;
+    border-bottom: 1px solid #eee;
+}
+
+.date-nav-btn {
+    background: none;
+    border: 1px solid #ddd;
+    padding: 0.25rem 0.5rem;
+    font-family: inherit;
+    font-size: 0.7rem;
+    cursor: pointer;
+    color: #666;
+}
+.date-nav-btn:hover { border-color: #111; color: #111; }
+
+.date-display {
+    font-size: 0.85rem;
+    color: #111;
+    font-weight: 600;
+}
+
+.btn-dark {
+    padding: 0.35rem 0.75rem;
+    background: #111;
+    color: #fff;
+    border: none;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 0.75rem;
+}
+.btn-dark:hover { background: #333; }
+.btn-dark:disabled {
+    background: #ccc;
+    cursor: not-allowed;
+}
+
+/* ------------------------------------------------------------------ */
+/* Loading / empty states                                             */
+/* ------------------------------------------------------------------ */
+.loading-state,
+.empty-state {
+    text-align: center;
+    padding: 3rem 0;
+    color: #888;
+    font-size: 0.85rem;
+}
+
+.loading-spinner {
+    display: inline-block;
+    animation: spin 1s linear infinite;
+}
+@keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+
+/* ------------------------------------------------------------------ */
+/* Briefing content — rendered markdown                               */
+/* ------------------------------------------------------------------ */
+.briefing-content {
+    line-height: 1.7;
+}
+
+.briefing-content h2 {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: #111;
+    margin-top: 1.5rem;
+    margin-bottom: 0.5rem;
+    padding-top: 1rem;
+    border-top: 1px solid #eee;
+}
+
+.briefing-content h2:first-child {
+    margin-top: 0;
+    padding-top: 0;
+    border-top: none;
+}
+
+.briefing-content p {
+    font-family: 'Open Sans', Helvetica, Arial, sans-serif;
+    font-size: 0.85rem;
+    color: #333;
+    margin-bottom: 0.75rem;
+}
+
+.briefing-content ul {
+    list-style: none;
+    margin-bottom: 0.75rem;
+}
+
+.briefing-content li {
+    font-family: 'Open Sans', Helvetica, Arial, sans-serif;
+    font-size: 0.85rem;
+    color: #333;
+    padding: 0.25rem 0;
+    padding-left: 1rem;
+    position: relative;
+}
+
+.briefing-content li::before {
+    content: "\2022";
+    color: #888;
+    position: absolute;
+    left: 0;
+}
+
+.briefing-content a {
+    color: #111;
+    text-decoration: underline;
+    text-decoration-color: #ccc;
+    text-underline-offset: 2px;
+}
+.briefing-content a:hover {
+    text-decoration-color: #111;
+}
+
+.briefing-content strong {
+    font-weight: 600;
+    color: #111;
+}
+
+.briefing-content em {
+    font-style: italic;
+    color: #555;
+}
+
+/* ------------------------------------------------------------------ */
+/* Reading progress panel                                             */
+/* ------------------------------------------------------------------ */
+.progress-panel {
+    margin-top: 2rem;
+    padding-top: 1rem;
+    border-top: 1px solid #eee;
+}
+
+.progress-title {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: #888;
+    margin-bottom: 0.75rem;
+    text-transform: lowercase;
+}
+
+.progress-list {
+    list-style: none;
+}
+
+.progress-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.5rem 0;
+    border-bottom: 1px solid #f5f5f5;
+    font-size: 0.8rem;
+}
+.progress-item:last-child { border-bottom: none; }
+
+.progress-series {
+    color: #111;
+    font-weight: 600;
+}
+
+.progress-position {
+    color: #888;
+    font-size: 0.7rem;
+}
+
+.progress-paused {
+    color: #e8a838;
+    font-size: 0.65rem;
+    font-weight: 600;
+}
+
+.progress-actions {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.text-btn {
+    background: none;
+    border: none;
+    color: #888;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 0.7rem;
+    padding: 0;
+}
+.text-btn:hover { color: #111; text-decoration: underline; }

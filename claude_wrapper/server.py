@@ -20,6 +20,14 @@ from claude_wrapper.conversation import ConversationManager
 from claude_wrapper.couch import CouchOrchestrator
 from claude_wrapper.db import Database
 from claude_wrapper.models import AVAILABLE_MODELS, StreamEventType
+from claude_wrapper.briefing_db import BriefingDatabase
+from claude_wrapper.briefing_routes import (
+    anki_router as briefing_anki_router,
+    init as init_briefing_routes,
+    progress_router as briefing_progress_router,
+    router as briefing_router,
+)
+from claude_wrapper.briefing_sequential import init_all_series
 from claude_wrapper.task_db import TaskDatabase
 from claude_wrapper.task_routes import router as task_router
 from claude_wrapper.task_routes import init as init_task_routes
@@ -30,6 +38,9 @@ load_dotenv()
 
 app = FastAPI(title="Claude Wrapper")
 app.include_router(task_router)
+app.include_router(briefing_router)
+app.include_router(briefing_progress_router)
+app.include_router(briefing_anki_router)
 
 # ---------------------------------------------------------------------------
 # Globals — initialized in lifespan
@@ -67,6 +78,9 @@ async def startup():
     task_db = TaskDatabase(db)
     register_task_tools(registry, task_db)
     init_task_routes(task_db)
+    briefing_db = BriefingDatabase(db)
+    init_briefing_routes(briefing_db, task_db, client)
+    init_all_series(briefing_db)
     manager = ConversationManager(client=client, tool_registry=registry, db=db)
     couch = CouchOrchestrator(client=client, db=db)
 
@@ -316,6 +330,15 @@ async def delete_prompt(prompt_id: str):
 @app.get("/tasks")
 async def tasks_page():
     return FileResponse(str(_static_dir / "tasks.html"))
+
+
+# ---------------------------------------------------------------------------
+# Briefing page route
+# ---------------------------------------------------------------------------
+
+@app.get("/briefing")
+async def briefing_page():
+    return FileResponse(str(_static_dir / "briefing.html"))
 
 
 # ---------------------------------------------------------------------------
