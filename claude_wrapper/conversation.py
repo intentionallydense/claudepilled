@@ -427,8 +427,8 @@ class ConversationManager:
             prompt = self.db.get_prompt(conv.prompt_id)
             if prompt:
                 parts.append(prompt["content"])
-        if not parts and conv.system_prompt:
-            return conv.system_prompt  # legacy fallback
+        if conv.system_prompt:
+            parts.append(conv.system_prompt)
         return "\n\n".join(parts)
 
     # ------------------------------------------------------------------

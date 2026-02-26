@@ -18,6 +18,7 @@ from claude_wrapper.briefing_anki import get_anki_stats
 from claude_wrapper.briefing_assembly import assemble_briefing
 from claude_wrapper.briefing_db import BriefingDatabase
 from claude_wrapper.client import ClaudeClient
+from claude_wrapper.conversation import ConversationManager
 from claude_wrapper.task_db import TaskDatabase
 
 # ------------------------------------------------------------------
@@ -26,14 +27,16 @@ from claude_wrapper.task_db import TaskDatabase
 briefing_db: BriefingDatabase | None = None
 task_db: TaskDatabase | None = None
 client: ClaudeClient | None = None
+conversation_manager: ConversationManager | None = None
 
 
-def init(bdb: BriefingDatabase, tdb: TaskDatabase, c: ClaudeClient) -> None:
+def init(bdb: BriefingDatabase, tdb: TaskDatabase, c: ClaudeClient, mgr: ConversationManager) -> None:
     """Called by server.py on startup to inject dependencies."""
-    global briefing_db, task_db, client
+    global briefing_db, task_db, client, conversation_manager
     briefing_db = bdb
     task_db = tdb
     client = c
+    conversation_manager = mgr
 
 
 # ------------------------------------------------------------------
@@ -66,6 +69,27 @@ async def assemble():
     """Assemble today's briefing. Idempotent unless force=true query param."""
     result = assemble_briefing(briefing_db, task_db, client, force=True)
     return result
+
+
+@router.post("/{date_str}/chat")
+async def get_or_create_chat(date_str: str):
+    """Return (or create) a chat conversation linked to this briefing."""
+    briefing = briefing_db.get_briefing_by_date(date_str)
+    if briefing is None:
+        return JSONResponse(status_code=404, content={"error": "No briefing for this date"})
+
+    # Return existing conversation if already linked
+    existing_id = briefing.get("chat_conversation_id")
+    if existing_id:
+        return {"conversation_id": existing_id}
+
+    # Create new conversation with briefing text as system prompt
+    conv = conversation_manager.create_conversation(
+        title=f"Briefing chat — {date_str}",
+        system_prompt=briefing["assembled_text"],
+    )
+    briefing_db.set_chat_conversation_id(date_str, conv.id)
+    return {"conversation_id": conv.id}
 
 
 # ------------------------------------------------------------------

@@ -79,9 +79,9 @@ async def startup():
     register_task_tools(registry, task_db)
     init_task_routes(task_db)
     briefing_db = BriefingDatabase(db)
-    init_briefing_routes(briefing_db, task_db, client)
     init_all_series(briefing_db)
     manager = ConversationManager(client=client, tool_registry=registry, db=db)
+    init_briefing_routes(briefing_db, task_db, client, manager)
     couch = CouchOrchestrator(client=client, db=db)
 
     # Migrate old setting key → new name (one-time, idempotent)

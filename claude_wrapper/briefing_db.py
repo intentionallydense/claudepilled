@@ -58,6 +58,11 @@ class BriefingDatabase:
                 shown_date TEXT NOT NULL
             );
         """)
+        # Idempotent migration: add chat_conversation_id column
+        try:
+            conn.execute("ALTER TABLE briefings ADD COLUMN chat_conversation_id TEXT")
+        except sqlite3.OperationalError:
+            pass  # column already exists
         conn.commit()
         conn.close()
 
@@ -93,6 +98,16 @@ class BriefingDatabase:
         result = dict(row)
         result["sections"] = json.loads(result["sections"])
         return result
+
+    def set_chat_conversation_id(self, date_str: str, conversation_id: str) -> None:
+        """Link a chat conversation to a briefing date."""
+        conn = self._connect()
+        conn.execute(
+            "UPDATE briefings SET chat_conversation_id = ? WHERE date = ?",
+            (conversation_id, date_str),
+        )
+        conn.commit()
+        conn.close()
 
     # ------------------------------------------------------------------
     # Reading progress

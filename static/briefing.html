@@ -9,50 +9,83 @@
     <link rel="stylesheet" href="/briefing.css">
 </head>
 <body>
-    <div id="briefing-page">
-        <header class="briefing-header">
-            <h1 class="briefing-title">briefing</h1>
-            <nav class="briefing-nav">
-                <a href="/" class="nav-link">chat</a>
-                <a href="/tasks" class="nav-link">tasks</a>
-                <a href="/couch" class="nav-link">couch</a>
-                <a href="/settings" class="nav-link">settings</a>
-            </nav>
-        </header>
+    <div id="briefing-page" class="no-chat">
+        <div id="briefing-column">
+            <header class="briefing-header">
+                <h1 class="briefing-title">briefing</h1>
+                <nav class="briefing-nav">
+                    <a href="/" class="nav-link">chat</a>
+                    <a href="/tasks" class="nav-link">tasks</a>
+                    <a href="/couch" class="nav-link">couch</a>
+                    <a href="/settings" class="nav-link">settings</a>
+                </nav>
+            </header>
 
-        <!-- Date navigation -->
-        <div class="date-bar">
-            <button id="prev-date" class="date-nav-btn">&larr; prev</button>
-            <span id="date-display" class="date-display"></span>
-            <div style="display:flex;gap:0.5rem;">
-                <button id="assemble-btn" class="btn-dark">assemble</button>
-                <button id="next-date" class="date-nav-btn">next &rarr;</button>
+            <!-- Date navigation -->
+            <div class="date-bar">
+                <button id="prev-date" class="date-nav-btn">&larr; prev</button>
+                <span id="date-display" class="date-display"></span>
+                <div style="display:flex;gap:0.5rem;">
+                    <button id="assemble-btn" class="btn-dark">assemble</button>
+                    <button id="next-date" class="date-nav-btn">next &rarr;</button>
+                </div>
+            </div>
+
+            <!-- Loading state -->
+            <div id="loading-state" class="loading-state" style="display:none;">
+                <span class="loading-spinner">&#x25e0;</span> loading...
+            </div>
+
+            <!-- Empty state -->
+            <div id="empty-state" class="empty-state" style="display:none;">
+                no briefing for this date.<br>
+                click "assemble" to generate today's briefing.
+            </div>
+
+            <!-- Assembling state -->
+            <div id="assembling-state" class="loading-state" style="display:none;">
+                <span class="loading-spinner">&#x25e0;</span> assembling briefing — fetching feeds, reading lists, calling claude...
+            </div>
+
+            <!-- Briefing content -->
+            <div id="briefing-content" class="briefing-content" style="display:none;"></div>
+
+            <!-- Reading progress panel -->
+            <div id="progress-panel" class="progress-panel">
+                <div class="progress-title">reading progress</div>
+                <ul id="progress-list" class="progress-list"></ul>
             </div>
         </div>
 
-        <!-- Loading state -->
-        <div id="loading-state" class="loading-state" style="display:none;">
-            <span class="loading-spinner">&#x25e0;</span> loading...
-        </div>
-
-        <!-- Empty state -->
-        <div id="empty-state" class="empty-state" style="display:none;">
-            no briefing for this date.<br>
-            click "assemble" to generate today's briefing.
-        </div>
-
-        <!-- Assembling state -->
-        <div id="assembling-state" class="loading-state" style="display:none;">
-            <span class="loading-spinner">&#x25e0;</span> assembling briefing — fetching feeds, reading lists, calling claude...
-        </div>
-
-        <!-- Briefing content -->
-        <div id="briefing-content" class="briefing-content" style="display:none;"></div>
-
-        <!-- Reading progress panel -->
-        <div id="progress-panel" class="progress-panel">
-            <div class="progress-title">reading progress</div>
-            <ul id="progress-list" class="progress-list"></ul>
+        <div id="chat-panel" class="chat-panel" style="display:none;">
+            <div class="chat-panel-header">
+                <div class="chat-header-left">
+                    <span class="chat-panel-title">discuss this briefing</span>
+                </div>
+                <div class="chat-header-right">
+                    <label class="thinking-toggle">
+                        <input type="checkbox" id="chat-thinking-checkbox">
+                        <span>thinking</span>
+                    </label>
+                    <span id="chat-cost-display" class="cost-display">0 tok | $0.0000</span>
+                </div>
+            </div>
+            <div class="chat-body">
+                <div id="chat-messages" class="chat-messages"></div>
+                <aside id="chat-tree-panel" class="chat-tree-panel">
+                    <div class="chat-tree-label">tree</div>
+                    <div id="chat-node-map" class="node-map"></div>
+                </aside>
+            </div>
+            <div class="chat-input-area">
+                <div class="chat-input-wrapper">
+                    <textarea id="chat-input" placeholder="ask about today's briefing..." rows="1"></textarea>
+                    <div class="input-actions">
+                        <span id="chat-input-status" class="input-status"></span>
+                        <button id="chat-send" class="send-btn">send</button>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
     <script src="/briefing.js"></script>
