@@ -225,6 +225,16 @@ class Database:
             return None
         return json.loads(row["metadata"])
 
+    def update_conversation_metadata(self, conversation_id: str, metadata: dict) -> None:
+        conn = self._connect()
+        now = datetime.now(timezone.utc).isoformat()
+        conn.execute(
+            "UPDATE conversations SET metadata = ?, updated_at = ? WHERE id = ?",
+            (json.dumps(metadata), now, conversation_id),
+        )
+        conn.commit()
+        conn.close()
+
     def delete_conversation(self, conversation_id: str) -> None:
         conn = self._connect()
         conn.execute("DELETE FROM messages WHERE conversation_id = ?", (conversation_id,))

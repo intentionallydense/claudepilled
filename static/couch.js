@@ -459,10 +459,77 @@ function autoResizeInput() {
 }
 
 // ---------------------------------------------------------------------------
+// System prompt editing
+// ---------------------------------------------------------------------------
+const promptsModal = document.getElementById("prompts-modal");
+
+async function openPromptsModal() {
+    if (!currentSessionId) return;
+
+    const meta = sessionMetadataCache[currentSessionId];
+    if (meta) {
+        document.getElementById("prompt-a-label").textContent = `${meta.model_a.label} (seat 1 — manages pacing)`;
+        document.getElementById("prompt-b-label").textContent = `${meta.model_b.label} (seat 2)`;
+    }
+
+    // Fetch current prompts (custom or defaults)
+    try {
+        const res = await fetch(`/api/couch/sessions/${currentSessionId}/prompts`, {
+            headers: { "Content-Type": "application/json" },
+        });
+        const data = await res.json();
+        document.getElementById("prompt-a-input").value = data.prompt_a || "";
+        document.getElementById("prompt-b-input").value = data.prompt_b || "";
+    } catch (e) {
+        console.error("Failed to load prompts:", e);
+    }
+
+    document.getElementById("prompts-save-status").textContent = "";
+    promptsModal.style.display = "flex";
+}
+
+async function savePrompts() {
+    if (!currentSessionId) return;
+    const promptA = document.getElementById("prompt-a-input").value;
+    const promptB = document.getElementById("prompt-b-input").value;
+
+    try {
+        await fetch(`/api/couch/sessions/${currentSessionId}/prompts`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ prompt_a: promptA, prompt_b: promptB }),
+        });
+        document.getElementById("prompts-save-status").textContent = "saved";
+        setTimeout(() => {
+            document.getElementById("prompts-save-status").textContent = "";
+        }, 2000);
+    } catch (e) {
+        document.getElementById("prompts-save-status").textContent = "error saving";
+    }
+}
+
+async function resetPrompts() {
+    if (!currentSessionId) return;
+    // Setting empty strings resets to defaults
+    await fetch(`/api/couch/sessions/${currentSessionId}/prompts`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt_a: "", prompt_b: "" }),
+    });
+    // Reload the defaults into the textareas
+    await openPromptsModal();
+    document.getElementById("prompts-save-status").textContent = "reset to defaults";
+    setTimeout(() => {
+        document.getElementById("prompts-save-status").textContent = "";
+    }, 2000);
+}
+
+// ---------------------------------------------------------------------------
 // Event listeners
 // ---------------------------------------------------------------------------
 newSessionBtn.onclick = showNewSessionModal;
 sendBtn.onclick = sendMessage;
+modelNames.onclick = openPromptsModal;
 
 document.getElementById("new-session-modal-close").onclick = () => {
     newSessionModal.style.display = "none";
@@ -471,6 +538,15 @@ newSessionModal.onclick = (e) => {
     if (e.target === newSessionModal) newSessionModal.style.display = "none";
 };
 document.getElementById("create-session-btn").onclick = createSession;
+
+document.getElementById("prompts-modal-close").onclick = () => {
+    promptsModal.style.display = "none";
+};
+promptsModal.onclick = (e) => {
+    if (e.target === promptsModal) promptsModal.style.display = "none";
+};
+document.getElementById("save-prompts-btn").onclick = savePrompts;
+document.getElementById("reset-prompts-btn").onclick = resetPrompts;
 
 messageInput.addEventListener("keydown", (e) => {
     if (e.key === "Enter" && !e.shiftKey) {

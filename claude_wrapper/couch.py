@@ -165,10 +165,11 @@ class CouchOrchestrator:
             model_a_id, model_a_label = DEFAULT_MODEL_A_ID, _get_model_label(DEFAULT_MODEL_A_ID)
             model_b_id, model_b_label = DEFAULT_MODEL_B_ID, _get_model_label(DEFAULT_MODEL_B_ID)
 
-        system_prompt_a = SYSTEM_PROMPT_A_TEMPLATE.format(
+        # Use custom prompts from metadata if set, otherwise use templates
+        system_prompt_a = (meta or {}).get("system_prompt_a") or SYSTEM_PROMPT_A_TEMPLATE.format(
             self_label=model_a_label, other_label=model_b_label,
         )
-        system_prompt_b = SYSTEM_PROMPT_B_TEMPLATE.format(
+        system_prompt_b = (meta or {}).get("system_prompt_b") or SYSTEM_PROMPT_B_TEMPLATE.format(
             self_label=model_b_label, other_label=model_a_label,
         )
 

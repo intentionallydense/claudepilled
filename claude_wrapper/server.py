@@ -388,6 +388,44 @@ async def get_couch_session_cost(session_id: str):
     return couch.get_cost(session_id)
 
 
+@app.get("/api/couch/sessions/{session_id}/prompts")
+async def get_couch_prompts(session_id: str):
+    """Get system prompts for a couch session (custom or defaults)."""
+    meta = couch.db.get_conversation_metadata(session_id)
+    if meta is None:
+        return JSONResponse(status_code=404, content={"error": "Not found"})
+    from claude_wrapper.couch import SYSTEM_PROMPT_A_TEMPLATE, SYSTEM_PROMPT_B_TEMPLATE
+    a_label = meta["model_a"]["label"]
+    b_label = meta["model_b"]["label"]
+    return {
+        "prompt_a": meta.get("system_prompt_a") or SYSTEM_PROMPT_A_TEMPLATE.format(
+            self_label=a_label, other_label=b_label,
+        ),
+        "prompt_b": meta.get("system_prompt_b") or SYSTEM_PROMPT_B_TEMPLATE.format(
+            self_label=b_label, other_label=a_label,
+        ),
+    }
+
+
+class UpdateCouchPromptsRequest(BaseModel):
+    prompt_a: str | None = None
+    prompt_b: str | None = None
+
+
+@app.patch("/api/couch/sessions/{session_id}/prompts")
+async def update_couch_prompts(session_id: str, req: UpdateCouchPromptsRequest):
+    """Update system prompts for a couch session. Empty string resets to default."""
+    meta = couch.db.get_conversation_metadata(session_id)
+    if meta is None:
+        return JSONResponse(status_code=404, content={"error": "Not found"})
+    if req.prompt_a is not None:
+        meta["system_prompt_a"] = req.prompt_a if req.prompt_a else None
+    if req.prompt_b is not None:
+        meta["system_prompt_b"] = req.prompt_b if req.prompt_b else None
+    couch.db.update_conversation_metadata(session_id, meta)
+    return {"ok": True}
+
+
 # ---------------------------------------------------------------------------
 # Couch WebSocket
 # ---------------------------------------------------------------------------

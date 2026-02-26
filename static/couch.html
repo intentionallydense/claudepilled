@@ -40,7 +40,7 @@
             <!-- Feed header -->
             <div id="feed-header" class="feed-header" style="display:none;">
                 <div class="feed-header-left">
-                    <span id="model-names" class="model-names"></span>
+                    <span id="model-names" class="model-names clickable" title="edit system prompts"></span>
                 </div>
                 <div class="feed-header-right">
                     <span id="status-indicator" class="status-indicator">ready</span>
@@ -67,6 +67,26 @@
                 </div>
             </div>
         </main>
+        <!-- Prompts modal -->
+        <div id="prompts-modal" class="modal" style="display:none;">
+            <div class="modal-content modal-wide">
+                <div class="modal-header">
+                    <span class="modal-title">system prompts</span>
+                    <button class="modal-close" id="prompts-modal-close">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <label class="form-label" id="prompt-a-label">seat 1</label>
+                    <textarea id="prompt-a-input" class="prompt-textarea" rows="8"></textarea>
+                    <label class="form-label" id="prompt-b-label">seat 2</label>
+                    <textarea id="prompt-b-input" class="prompt-textarea" rows="6"></textarea>
+                    <div class="prompt-actions">
+                        <button id="save-prompts-btn" class="btn-dark">save</button>
+                        <button id="reset-prompts-btn" class="text-btn">reset to defaults</button>
+                        <span id="prompts-save-status" class="save-status"></span>
+                    </div>
+                </div>
+            </div>
+        </div>
         <!-- New session modal -->
         <div id="new-session-modal" class="modal" style="display:none;">
             <div class="modal-content">

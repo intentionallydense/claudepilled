@@ -152,6 +152,15 @@ body {
     font-weight: 600;
     color: #111;
 }
+.model-names.clickable {
+    cursor: pointer;
+    text-decoration-color: #ccc;
+    text-underline-offset: 3px;
+}
+.model-names.clickable:hover {
+    text-decoration: underline;
+    text-decoration-color: #888;
+}
 
 .status-indicator {
     font-size: 0.7rem;
@@ -377,6 +386,32 @@ body {
 }
 .modal-close:hover { color: #111; }
 .modal-body { padding: 1rem; }
+.modal-wide { width: 560px; }
+
+.prompt-textarea {
+    width: 100%;
+    background: #fff;
+    color: #111;
+    border: 1px solid #ddd;
+    padding: 0.5rem;
+    font-family: "SF Mono", Monaco, Consolas, "Courier New", monospace;
+    font-size: 0.75rem;
+    resize: vertical;
+    line-height: 1.5;
+    margin-bottom: 0.75rem;
+}
+.prompt-textarea:focus { outline: none; border-color: #111; }
+
+.prompt-actions {
+    display: flex;
+    gap: 0.75rem;
+    align-items: center;
+}
+
+.save-status {
+    font-size: 0.7rem;
+    color: #888;
+}
 
 .form-label {
     display: block;
