@@ -117,14 +117,7 @@ body {
 /* ------------------------------------------------------------------ */
 /* Chat header                                                        */
 /* ------------------------------------------------------------------ */
-/* Controls row below the send button */
-.chat-controls {
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
-    margin-top: 0.5rem;
-    flex-wrap: wrap;
-}
+/* (chat-header section removed — controls now in input-actions row) */
 
 .select-minimal {
     background: #fff;
@@ -500,7 +493,6 @@ body {
 }
 
 .input-wrapper {
-    max-width: 640px;
     position: relative;
 }
 
@@ -521,10 +513,11 @@ body {
 
 .input-actions {
     display: flex;
-    justify-content: space-between;
     align-items: center;
+    gap: 0.5rem;
     margin-top: 0.5rem;
 }
+.input-actions-spacer { flex: 1; }
 
 .input-status {
     font-size: 0.8rem;

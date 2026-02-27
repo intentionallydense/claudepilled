@@ -31,7 +31,6 @@ const appEl = document.getElementById("app");
 const conversationList = document.getElementById("conversation-list");
 const messagesEl = document.getElementById("messages");
 const welcomeEl = document.getElementById("welcome");
-const chatControls = document.getElementById("chat-controls");
 const inputArea = document.getElementById("input-area");
 const messageInput = document.getElementById("message-input");
 const sendBtn = document.getElementById("send-btn");
@@ -80,7 +79,7 @@ function populateModelSelect(select, selectedModel) {
     for (const m of availableModels) {
         const opt = document.createElement("option");
         opt.value = m.id;
-        opt.textContent = `${m.name} ($${m.input_cost}/$${m.output_cost})`;
+        opt.textContent = m.name;
         if (m.id === selectedModel) opt.selected = true;
         select.appendChild(opt);
     }
