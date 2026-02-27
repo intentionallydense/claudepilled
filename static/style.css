@@ -657,33 +657,39 @@ body {
 .board-pin .pin-delete:hover { background: #c00; }
 
 .board-input-area {
-    display: flex;
     border-top: 1px solid #eee;
+    padding: 0.5rem;
     flex-shrink: 0;
 }
 #board-input {
-    flex: 1;
-    border: none;
-    padding: 0.4rem 0.5rem;
-    font-family: inherit;
-    font-size: 0.7rem;
+    width: 100%;
+    background: #fff;
     color: #111;
+    border: 1px solid #ddd;
+    padding: 0.4rem 0.5rem;
+    font-family: 'Open Sans', Helvetica, Arial, sans-serif;
+    font-size: 0.8rem;
     resize: none;
-    line-height: 1.4;
+    line-height: 1.5;
+    max-height: 100px;
 }
-#board-input:focus { outline: none; }
-#board-input::placeholder { color: #bbb; }
+#board-input:focus { outline: none; border-color: #111; }
+#board-input::placeholder { color: #aaa; }
+.board-input-actions {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: 0.35rem;
+}
 .board-input-btn {
+    background: #111;
+    color: #fff;
     border: none;
-    background: none;
-    color: #888;
+    padding: 0.3rem 0.75rem;
     font-family: inherit;
-    font-size: 0.7rem;
-    padding: 0.4rem 0.6rem;
+    font-size: 0.8rem;
     cursor: pointer;
-    flex-shrink: 0;
 }
-.board-input-btn:hover { color: #111; }
+.board-input-btn:hover { background: #333; }
 
 /* Drop zone feedback */
 .board-panel.dragover .board-content {
