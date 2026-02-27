@@ -517,6 +517,7 @@ body {
     align-items: center;
     gap: 0.5rem;
     margin-top: 0.5rem;
+    max-width: 640px;
 }
 .input-actions-spacer { flex: 1; }
 
@@ -659,7 +660,7 @@ body {
 
 .board-input-area {
     border-top: 1px solid #eee;
-    padding: 0.75rem;
+    padding: 1rem 0.5rem;
     flex-shrink: 0;
 }
 #board-input {
