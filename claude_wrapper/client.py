@@ -19,7 +19,7 @@ from claude_wrapper.models import (
     ToolDefinition,
 )
 
-DEFAULT_MODEL = "claude-sonnet-4-6"
+DEFAULT_MODEL = "claude-opus-4-6"
 DEFAULT_MAX_TOKENS = 8192
 
 

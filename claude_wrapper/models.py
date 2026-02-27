@@ -34,8 +34,8 @@ MODEL_PRICING: dict[str, tuple[float, float]] = {
 }
 
 AVAILABLE_MODELS = [
-    {"id": "claude-sonnet-4-6", "name": "Claude 4.6 Sonnet", "input_cost": 3.0, "output_cost": 15.0},
     {"id": "claude-opus-4-6", "name": "Claude 4.6 Opus", "input_cost": 5.0, "output_cost": 25.0},
+    {"id": "claude-sonnet-4-6", "name": "Claude 4.6 Sonnet", "input_cost": 3.0, "output_cost": 15.0},
     {"id": "claude-opus-4-5-20251101", "name": "Claude 4.5 Opus", "input_cost": 15.0, "output_cost": 75.0},
     {"id": "claude-haiku-4-5-20251001", "name": "Claude 4.5 Haiku", "input_cost": 1.0, "output_cost": 5.0},
     {"id": "claude-sonnet-4-20250514", "name": "Claude 4 Sonnet", "input_cost": 3.0, "output_cost": 15.0},

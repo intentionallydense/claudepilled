@@ -8,6 +8,9 @@
 // ------------------------------------------------------------------
 let currentDate = new Date().toISOString().slice(0, 10);
 
+// Models
+let chatAvailableModels = [];
+
 // Chat state
 let chatConversationId = null;
 let chatWs = null;
@@ -47,6 +50,28 @@ async function apiGet(path) {
     const res = await fetch(path, { headers: { "Content-Type": "application/json" } });
     if (!res.ok) throw new Error(`API error: ${res.status}`);
     return res.json();
+}
+
+// ------------------------------------------------------------------
+// Models
+// ------------------------------------------------------------------
+
+async function chatLoadModels() {
+    chatAvailableModels = await apiGet("/api/models");
+    chatPopulateModelSelect();
+}
+
+function chatPopulateModelSelect(selectedModel) {
+    const select = document.getElementById("chat-model-select");
+    if (!select) return;
+    select.innerHTML = "";
+    for (const m of chatAvailableModels) {
+        const opt = document.createElement("option");
+        opt.value = m.id;
+        opt.textContent = `${m.name} ($${m.input_cost}/$${m.output_cost})`;
+        if (m.id === selectedModel) opt.selected = true;
+        select.appendChild(opt);
+    }
 }
 
 // ------------------------------------------------------------------
@@ -311,6 +336,9 @@ async function chatLoadConversation(conversationId) {
             conv.total_cost || 0,
         );
 
+        // Set model selector to this conversation's model
+        chatPopulateModelSelect(conv.model);
+
         let renderedCount = 0;
         let lastAssistantEl = null;
         for (let i = 0; i < conv.messages.length; i++) {
@@ -335,6 +363,22 @@ async function chatLoadConversation(conversationId) {
         }
         chatScrollToBottom();
         await chatLoadTree();
+
+        // Auto-toggle thinking: check if last assistant message had thinking blocks
+        const thinkingCb = document.getElementById("chat-thinking-checkbox");
+        if (thinkingCb) {
+            let lastHadThinking = false;
+            for (let i = conv.messages.length - 1; i >= 0; i--) {
+                if (conv.messages[i].role === "assistant") {
+                    const c = conv.messages[i].content;
+                    if (Array.isArray(c)) {
+                        lastHadThinking = c.some(b => b.type === "thinking" && b.thinking);
+                    }
+                    break;
+                }
+            }
+            thinkingCb.checked = lastHadThinking;
+        }
     } catch (e) {
         console.error("Failed to load chat conversation:", e);
     }
@@ -477,6 +521,15 @@ function handleChatStreamEvent(event) {
                 }
             }
 
+            // Auto-toggle thinking checkbox: if this response used thinking, keep it on;
+            // otherwise turn it off. Persists the user's intent across turns.
+            const thinkingCb = document.getElementById("chat-thinking-checkbox");
+            if (thinkingCb) {
+                const usedThinking = chatStreamingEl &&
+                    chatStreamingEl.querySelector(".thinking-block") !== null;
+                thinkingCb.checked = !!usedThinking;
+            }
+
             const wasEdit = chatIsEditing;
             chatStreamingEl = null;
             chatStreamingTextEl = null;
@@ -486,15 +539,18 @@ function handleChatStreamEvent(event) {
             chatIsStreaming = false;
             chatIsEditing = false;
             inputEl.disabled = false;
-            sendBtn.disabled = false;
+            chatShowSendButton();
 
             if (wasEdit) {
+                // Reload to get proper branch state + reconnect WS (matches main chat)
                 chatLoadConversation(chatConversationId);
+                connectChatWebSocket(chatConversationId);
             } else {
                 inputEl.focus();
                 chatFetchAndUpdateCost();
                 chatScrollToBottom();
                 chatLoadTree();
+                chatSyncMessageIds();
             }
             break;
 
@@ -509,7 +565,7 @@ function handleChatStreamEvent(event) {
             if (!isRetry) {
                 chatIsStreaming = false;
                 inputEl.disabled = false;
-                sendBtn.disabled = false;
+                chatShowSendButton();
             }
             chatMaybeScrollToBottom();
             break;
@@ -786,7 +842,7 @@ function chatSubmitEdit(parentId, newText, formEl) {
     chatIsStreaming = true;
     chatIsEditing = true;
     document.getElementById("chat-input").disabled = true;
-    document.getElementById("chat-send").disabled = true;
+    chatShowStopButton();
 
     // Show the user's edited text
     const messagesEl = document.getElementById("chat-messages");
@@ -861,8 +917,51 @@ function sendChatMessage() {
     clearBriefingImagePreviews();
     chatAutoResizeInput();
     chatIsStreaming = true;
-    sendBtn.disabled = true;
+    chatShowStopButton();
     inputEl.disabled = true;
+}
+
+function chatShowStopButton() {
+    document.getElementById("chat-send").style.display = "none";
+    document.getElementById("chat-stop").style.display = "inline-block";
+}
+
+function chatShowSendButton() {
+    document.getElementById("chat-stop").style.display = "none";
+    const sendBtn = document.getElementById("chat-send");
+    sendBtn.style.display = "inline-block";
+    sendBtn.disabled = false;
+}
+
+function chatStopStreaming() {
+    if (!chatIsStreaming) return;
+
+    // Final render of any partial content
+    if (chatMarkdownRenderTimer) clearTimeout(chatMarkdownRenderTimer);
+    if (chatStreamingTextEl && chatStreamingRawText) {
+        chatStreamingTextEl.innerHTML = chatRenderMarkdown(chatStreamingRawText);
+        chatRemoveStreamingCursor(chatStreamingTextEl);
+    }
+
+    chatStreamingRawText = "";
+    chatMarkdownRenderTimer = null;
+    if (chatStreamingSearchEl) { chatStreamingSearchEl.remove(); chatStreamingSearchEl = null; }
+    chatStreamingEl = null;
+    chatStreamingTextEl = null;
+    chatStreamingThinkingEl = null;
+    chatStreamingToolCalls = {};
+    chatToolResultsSinceLastText = false;
+    chatIsStreaming = false;
+    chatIsEditing = false;
+    document.getElementById("chat-input").disabled = false;
+    chatShowSendButton();
+
+    // Close WS — server cleans up on disconnect — then reload
+    if (chatWs) { chatWs.close(); chatWs = null; }
+    if (chatConversationId) {
+        chatLoadConversation(chatConversationId);
+        connectChatWebSocket(chatConversationId);
+    }
 }
 
 // ------------------------------------------------------------------
@@ -890,6 +989,24 @@ async function chatFetchAndUpdateCost() {
     try {
         const data = await apiGet(`/api/conversations/${chatConversationId}/cost`);
         chatUpdateCostDisplay(data.input_tokens, data.output_tokens, data.cost);
+    } catch (e) { /* ignore */ }
+}
+
+// Sync DOM message IDs/parentIds with DB after streaming — ensures edit
+// branches from the correct parent instead of root (fixes history wipe bug)
+async function chatSyncMessageIds() {
+    if (!chatConversationId) return;
+    try {
+        const conv = await apiGet(`/api/conversations/${chatConversationId}`);
+        const msgEls = document.getElementById("chat-messages").querySelectorAll(".message");
+        const convMsgs = conv.messages.filter(m => {
+            if (Array.isArray(m.content) && m.content.every(b => b.type === "tool_result")) return false;
+            return true;
+        });
+        for (let i = 0; i < Math.min(msgEls.length, convMsgs.length); i++) {
+            msgEls[i].dataset.msgId = convMsgs[i].id;
+            msgEls[i].dataset.parentId = convMsgs[i].parent_id || "";
+        }
     } catch (e) { /* ignore */ }
 }
 
@@ -1384,6 +1501,7 @@ document.addEventListener("DOMContentLoaded", () => {
     document.getElementById("next-date").addEventListener("click", () => handleDateNav(1));
     document.getElementById("assemble-btn").addEventListener("click", handleAssemble);
     document.getElementById("chat-send").addEventListener("click", sendChatMessage);
+    document.getElementById("chat-stop").addEventListener("click", chatStopStreaming);
 
     const chatInput = document.getElementById("chat-input");
     chatInput.addEventListener("keydown", (e) => {
@@ -1415,6 +1533,15 @@ document.addEventListener("DOMContentLoaded", () => {
 
     document.getElementById("chat-messages").addEventListener("scroll", chatSyncTreeWithScroll);
 
+    // Focus chat input on printable character press (matches main chat behavior)
+    document.addEventListener("keydown", (e) => {
+        if (e.key.length !== 1 || e.ctrlKey || e.altKey || e.metaKey) return;
+        const active = document.activeElement;
+        if (active && (active.tagName === "INPUT" || active.tagName === "TEXTAREA" || active.tagName === "SELECT")) return;
+        if (chatInput.disabled || !chatConversationId) return;
+        chatInput.focus({ preventScroll: true });
+    });
+
     // Arrow key navigation for tree panel
     document.addEventListener("keydown", (e) => {
         if (!["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.key)) return;
@@ -1432,8 +1559,16 @@ document.addEventListener("DOMContentLoaded", () => {
         chatNavigateTreeArrowKey(dirMap[e.key]);
     });
 
+    // Model selector change — update the conversation's model
+    const chatModelSelect = document.getElementById("chat-model-select");
+    chatModelSelect.onchange = async function () {
+        if (!chatConversationId) return;
+        await api("PATCH", `/api/conversations/${chatConversationId}`, { model: this.value });
+    };
+
     marked.setOptions({ breaks: true, gfm: true });
 
+    chatLoadModels();
     loadBriefing(currentDate);
     loadProgress();
 });

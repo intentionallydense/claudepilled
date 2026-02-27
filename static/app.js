@@ -192,6 +192,22 @@ async function openConversation(id) {
     await loadTree();
     await loadContext();
     connectWebSocket(id);
+
+    // Auto-toggle thinking: check if last assistant message had thinking blocks
+    if (thinkingCheckbox) {
+        let lastHadThinking = false;
+        for (let i = conv.messages.length - 1; i >= 0; i--) {
+            if (conv.messages[i].role === "assistant") {
+                const c = conv.messages[i].content;
+                if (Array.isArray(c)) {
+                    lastHadThinking = c.some(b => b.type === "thinking" && b.thinking);
+                }
+                break;
+            }
+        }
+        thinkingCheckbox.checked = lastHadThinking;
+    }
+
     messageInput.focus();
 }
 
@@ -420,6 +436,14 @@ function handleStreamEvent(event) {
                 if (!tc.result) {
                     renderToolCallBlock(streamingEl, tc);
                 }
+            }
+
+            // Auto-toggle thinking checkbox: if this response used thinking, keep it on;
+            // otherwise turn it off. Persists the user's intent across turns.
+            if (thinkingCheckbox) {
+                const usedThinking = streamingEl &&
+                    streamingEl.querySelector(".thinking-block") !== null;
+                thinkingCheckbox.checked = !!usedThinking;
             }
 
             const wasEdit = !!editingMessageId;
