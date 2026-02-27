@@ -195,6 +195,8 @@ async function openConversation(id) {
     renderConversationMessages(conv.messages);
     scrollToBottom();
     await loadTree();
+    // Snap tree to bottom to match chat scroll position on load
+    nodeMap.scrollTop = nodeMap.scrollHeight;
     await loadContext();
     connectWebSocket(id);
 
