@@ -498,6 +498,7 @@ body {
 
 #message-input {
     width: 100%;
+    max-width: 640px;
     background: #fff;
     color: #111;
     border: 1px solid #ddd;
