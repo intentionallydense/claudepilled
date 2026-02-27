@@ -28,6 +28,9 @@ Claude Wrapper is a personal web UI and API wrapper around the Anthropic Claude 
 | `briefing_routes.py` | FastAPI routers for `/api/briefing/*`, `/api/reading-progress/*`, `/api/anki/*` |
 | `file_db.py` | `FileDatabase` — CRUD for uploaded files, per-conversation active file context, tag normalization |
 | `file_routes.py` | FastAPI `APIRouter` for `/api/files/*` endpoints — upload (PDF/MD), tag management, context activation |
+| `pin_db.py` | `PinDatabase` — CRUD for the `pins` table (moodboard). Images stored as data URIs |
+| `pin_routes.py` | FastAPI `APIRouter` for `/api/pins/*` endpoints — list, create, upload image, delete |
+| `pin_tools.py` | Claude tool definitions for moodboard (moodboard_pin, moodboard_remove) |
 
 ### Frontend (`static/`)
 
@@ -80,6 +83,7 @@ Claude Wrapper is a personal web UI and API wrapper around the Anthropic Claude 
 - **File storage in SQLite** — file content stored directly in the `files` table (not on disk). 5MB upload limit, 1M character content extraction limit. PDF text extracted via PyMuPDF.
 - **Bidirectional tree layout** — conversation tree branches grow both left and right from the trunk. At branch points, 1st child continues straight, subsequent siblings alternate right/left. Depth indicator lines appear every 10 exchanges.
 - **Arrow key tree navigation** — when the tree panel is visible, arrow keys navigate the conversation tree. Up/Down walk along on-path nodes and scroll the corresponding message into view. Left/Right jump between nodes at the same tree depth (sorted by x position), triggering a branch switch if the target is off-path. Scroll↔tree sync is suppressed for 600ms during arrow nav to prevent the smooth-scroll feedback loop from fighting the highlight. Module-level `treeChildrenMap`, `treeParentMap`, and `arrowNavActive` support this.
+- **Moodboard** — a persistent visual pinning space in a dedicated column between chat and tree. Chat column is capped at ~700px (message width + padding) so the moodboard sits adjacent to the text content rather than being separated by empty space. Supports text, links, images (stored as data URIs), and pinned chat messages. Zero-friction: no tags, categories, or positioning. Images can be dragged/dropped or pasted. Claude has `moodboard_pin`/`moodboard_remove` tools to interact with the board. Pins show source (sylvia/claude) and timestamp, with delete-on-hover. CSS columns masonry layout, newest first.
 
 ## Data Flow
 

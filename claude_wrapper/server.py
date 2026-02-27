@@ -36,6 +36,10 @@ from claude_wrapper.file_routes import init as init_file_routes
 from claude_wrapper.task_db import TaskDatabase
 from claude_wrapper.task_routes import router as task_router
 from claude_wrapper.task_routes import init as init_task_routes
+from claude_wrapper.pin_db import PinDatabase
+from claude_wrapper.pin_routes import router as pin_router
+from claude_wrapper.pin_routes import init as init_pin_routes
+from claude_wrapper.pin_tools import register_pin_tools
 from claude_wrapper.task_tools import BRAIN_DUMP_PROMPT, register_task_tools
 from claude_wrapper.tools import ToolRegistry
 
@@ -47,6 +51,7 @@ app.include_router(task_router)
 app.include_router(briefing_router)
 app.include_router(briefing_progress_router)
 app.include_router(briefing_anki_router)
+app.include_router(pin_router)
 
 # ---------------------------------------------------------------------------
 # Globals — initialized in lifespan
@@ -87,6 +92,9 @@ async def startup():
     init_task_routes(task_db)
     file_db_instance = FileDatabase(db)
     init_file_routes(file_db_instance)
+    pin_db = PinDatabase(db)
+    register_pin_tools(registry, pin_db)
+    init_pin_routes(pin_db)
     briefing_db = BriefingDatabase(db)
     init_all_series(briefing_db)
     manager = ConversationManager(client=client, tool_registry=registry, db=db, file_db=file_db_instance)

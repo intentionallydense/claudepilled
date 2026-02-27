@@ -18,6 +18,9 @@ let activeContext = { files: [], total_tokens: 0 };
 // Image paste state
 let pendingImages = [];
 
+// Moodboard state
+let boardPins = [];
+
 // Markdown streaming state
 let streamingRawText = "";
 let markdownRenderTimer = null;
@@ -28,7 +31,7 @@ const appEl = document.getElementById("app");
 const conversationList = document.getElementById("conversation-list");
 const messagesEl = document.getElementById("messages");
 const welcomeEl = document.getElementById("welcome");
-const chatHeader = document.getElementById("chat-header");
+const chatControls = document.getElementById("chat-controls");
 const inputArea = document.getElementById("input-area");
 const messageInput = document.getElementById("message-input");
 const sendBtn = document.getElementById("send-btn");
@@ -38,6 +41,10 @@ const modelSelect = document.getElementById("model-select");
 const thinkingCheckbox = document.getElementById("thinking-checkbox");
 const costDisplay = document.getElementById("cost-display");
 const promptSelect = document.getElementById("prompt-select");
+const boardPanel = document.getElementById("board-panel");
+const boardContent = document.getElementById("board-content");
+const boardPinsEl = document.getElementById("board-pins");
+const boardInput = document.getElementById("board-input");
 const treePanel = document.getElementById("tree-panel");
 const nodeMap = document.getElementById("node-map");
 const treeSearch = document.getElementById("tree-search");
@@ -165,11 +172,10 @@ async function openConversation(id) {
 
     // Show chat UI
     welcomeEl.style.display = "none";
-    chatHeader.style.display = "flex";
     messagesEl.style.display = "flex";
     inputArea.style.display = "block";
     treePanel.style.display = "flex";
-    appEl.classList.remove("no-tree");
+    appEl.classList.add("has-tree");
 
     messagesEl.innerHTML = "";
 
@@ -213,11 +219,10 @@ async function openConversation(id) {
 
 function showWelcome() {
     welcomeEl.style.display = "flex";
-    chatHeader.style.display = "none";
     messagesEl.style.display = "none";
     inputArea.style.display = "none";
     treePanel.style.display = "none";
-    appEl.classList.add("no-tree");
+    appEl.classList.remove("has-tree");
     if (ws) { ws.close(); ws = null; }
 }
 
@@ -558,17 +563,39 @@ function createMessageEl(role, index, msgId, parentId) {
     text.className = "message-text";
     div.appendChild(text);
 
-    // Add edit button for user messages
+    // Action buttons
+    const actions = document.createElement("div");
+    actions.className = "message-actions";
+
     if (role === "user") {
-        const actions = document.createElement("div");
-        actions.className = "message-actions";
         const editBtn = document.createElement("button");
         editBtn.className = "edit-btn";
         editBtn.textContent = "edit";
         editBtn.onclick = () => startEdit(div);
         actions.appendChild(editBtn);
-        div.appendChild(actions);
     }
+
+    if (role === "assistant") {
+        const copyBtn = document.createElement("button");
+        copyBtn.className = "msg-action-btn";
+        copyBtn.textContent = "copy";
+        copyBtn.onclick = () => copyMessageText(div);
+        actions.appendChild(copyBtn);
+
+        const regenBtn = document.createElement("button");
+        regenBtn.className = "msg-action-btn";
+        regenBtn.textContent = "regenerate";
+        regenBtn.onclick = () => regenerateResponse(div);
+        actions.appendChild(regenBtn);
+    }
+
+    const pinBtn = document.createElement("button");
+    pinBtn.className = "msg-action-btn";
+    pinBtn.textContent = "pin";
+    pinBtn.onclick = () => pinMessage(div);
+    actions.appendChild(pinBtn);
+
+    div.appendChild(actions);
 
     return div;
 }
@@ -1187,8 +1214,37 @@ function syncTreeWithScroll() {
     let closestIdx = 0;
     let closestDist = Infinity;
 
-    // Match message elements to on-path tree nodes
-    const onPathNodes = treeNodes.filter(tn => tn.onPath);
+    // Match message elements to on-path tree nodes.
+    // Sort by depth so they align with DOM order (shallowest first).
+    const onPathNodes = treeNodes.filter(tn => tn.onPath).sort((a, b) => a.depth - b.depth);
+    if (onPathNodes.length === 0) return;
+
+    // Snap to last node when scrolled to bottom, first when at top.
+    // Use scrollIntoView "end"/"start" so the tree visually matches.
+    const scrollBottom = messagesEl.scrollHeight - messagesEl.scrollTop - messagesEl.clientHeight;
+    if (scrollBottom < 40) {
+        const idx = treeNodes.indexOf(onPathNodes[onPathNodes.length - 1]);
+        if (idx >= 0 && treeNodes[idx]) {
+            if (currentHighlight !== null && treeNodes[currentHighlight])
+                treeNodes[currentHighlight].el.classList.remove("scroll-highlight");
+            treeNodes[idx].el.classList.add("scroll-highlight");
+            treeNodes[idx].el.scrollIntoView({ behavior: "smooth", block: "end" });
+            currentHighlight = idx;
+        }
+        return;
+    }
+    if (messagesEl.scrollTop < 40) {
+        const idx = treeNodes.indexOf(onPathNodes[0]);
+        if (idx >= 0 && treeNodes[idx]) {
+            if (currentHighlight !== null && treeNodes[currentHighlight])
+                treeNodes[currentHighlight].el.classList.remove("scroll-highlight");
+            treeNodes[idx].el.classList.add("scroll-highlight");
+            treeNodes[idx].el.scrollIntoView({ behavior: "smooth", block: "start" });
+            currentHighlight = idx;
+        }
+        return;
+    }
+
     msgEls.forEach((el, i) => {
         const rect = el.getBoundingClientRect();
         const dist = Math.abs(rect.top + rect.height / 2 - centerY);
@@ -1220,7 +1276,7 @@ function filterTree() {
 function navigateTreeArrowKey(direction) {
     if (treeNodes.length === 0) return;
 
-    const onPathNodes = treeNodes.filter(tn => tn.onPath);
+    const onPathNodes = treeNodes.filter(tn => tn.onPath).sort((a, b) => a.depth - b.depth);
     if (onPathNodes.length === 0) return;
 
     // Suppress scroll↔tree sync so the smooth scroll doesn't fight our highlight
@@ -1964,14 +2020,266 @@ messageInput.addEventListener("blur", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Moodboard
+// ---------------------------------------------------------------------------
+async function loadBoard() {
+    try {
+        boardPins = await api("/pins");
+        renderBoard();
+    } catch (e) {
+        console.error("Failed to load board:", e);
+    }
+}
+
+function renderBoard() {
+    boardPinsEl.innerHTML = "";
+    for (const pin of boardPins) {
+        boardPinsEl.appendChild(createPinEl(pin));
+    }
+}
+
+function createPinEl(pin) {
+    const el = document.createElement("div");
+    el.className = "board-pin";
+    el.dataset.pinId = pin.id;
+
+    // Delete button
+    const del = document.createElement("button");
+    del.className = "pin-delete";
+    del.textContent = "\u00d7";
+    del.onclick = async (e) => {
+        e.stopPropagation();
+        await api(`/pins/${pin.id}`, { method: "DELETE" });
+        el.remove();
+        boardPins = boardPins.filter(p => p.id !== pin.id);
+    };
+    el.appendChild(del);
+
+    // Content based on type
+    if (pin.type === "image") {
+        const img = document.createElement("img");
+        img.src = pin.content;
+        img.loading = "lazy";
+        el.appendChild(img);
+    } else if (pin.type === "link") {
+        const a = document.createElement("a");
+        a.className = "pin-link";
+        a.href = pin.content;
+        a.target = "_blank";
+        a.rel = "noopener";
+        a.textContent = pin.content;
+        el.appendChild(a);
+    } else {
+        // text or message
+        const txt = document.createElement("div");
+        txt.className = "pin-text";
+        txt.textContent = pin.content;
+        el.appendChild(txt);
+    }
+
+    // Note
+    if (pin.note) {
+        const note = document.createElement("div");
+        note.className = "pin-note";
+        note.textContent = pin.note;
+        el.appendChild(note);
+    }
+
+    // Meta line: source + timestamp
+    const meta = document.createElement("div");
+    meta.className = "pin-meta";
+    const src = document.createElement("span");
+    src.className = "pin-source";
+    src.textContent = pin.source;
+    meta.appendChild(src);
+    const time = document.createElement("span");
+    const d = new Date(pin.created);
+    time.textContent = d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+    meta.appendChild(time);
+    el.appendChild(meta);
+
+    return el;
+}
+
+async function createPin(type, content, opts = {}) {
+    const pin = await api("/pins", {
+        method: "POST",
+        body: JSON.stringify({
+            type,
+            content,
+            source: opts.source || "sylvia",
+            note: opts.note || null,
+            conversation_id: opts.conversation_id || null,
+            message_id: opts.message_id || null,
+        }),
+    });
+    boardPins.unshift(pin);
+    boardPinsEl.prepend(createPinEl(pin));
+}
+
+// Pin message from chat
+function pinMessage(msgEl) {
+    const textEl = msgEl.querySelector(".message-text");
+    const text = textEl?.innerText || textEl?.textContent || "";
+    if (!text.trim()) return;
+    createPin("message", text.trim(), {
+        conversation_id: currentConversationId,
+        message_id: msgEl.dataset.msgId,
+    });
+}
+
+// Copy assistant message text
+function copyMessageText(msgEl) {
+    const textEl = msgEl.querySelector(".message-text");
+    const text = textEl?.innerText || textEl?.textContent || "";
+    navigator.clipboard.writeText(text).then(() => {
+        const btn = msgEl.querySelector(".msg-action-btn");
+        if (btn && btn.textContent === "copy") {
+            btn.textContent = "copied";
+            setTimeout(() => { btn.textContent = "copy"; }, 1500);
+        }
+    });
+}
+
+// Regenerate: resubmit the same user message to create a new branch
+function regenerateResponse(assistantMsgEl) {
+    if (isStreaming || !ws || !currentConversationId) return;
+    // The assistant message's parent is the user message that triggered it
+    const parentId = assistantMsgEl.dataset.parentId;
+    if (!parentId) return;
+    // Find the user message element with that msgId
+    const userMsgEl = messagesEl.querySelector(`.message[data-msg-id="${parentId}"]`);
+    if (!userMsgEl) return;
+    const rawText = userMsgEl.dataset.rawText;
+    if (!rawText) return;
+    // The user message's parentId is where the edit branches from
+    const branchParentId = userMsgEl.dataset.parentId || null;
+    // Send as an edit from the same branch point with the same content
+    const payload = {
+        action: "edit",
+        parent_id: branchParentId,
+        message: rawText,
+    };
+    if (thinkingCheckbox && thinkingCheckbox.checked) {
+        payload.thinking_budget = 10000;
+    }
+    // Set up streaming UI
+    isStreaming = true;
+    sendBtn.style.display = "none";
+    stopBtn.style.display = "inline-block";
+    messageInput.disabled = true;
+    // Add spacer + streaming elements
+    const spacer1 = document.createElement("div");
+    spacer1.className = "message-spacer";
+    messagesEl.appendChild(spacer1);
+    streamingEl = createMessageEl("user", undefined, null, branchParentId);
+    streamingEl.querySelector(".message-text").textContent = rawText;
+    streamingEl.dataset.rawText = rawText;
+    messagesEl.appendChild(streamingEl);
+    const spacer2 = document.createElement("div");
+    spacer2.className = "message-spacer";
+    messagesEl.appendChild(spacer2);
+    streamingEl = createMessageEl("assistant", undefined, null, null);
+    streamingTextEl = streamingEl.querySelector(".message-text");
+    messagesEl.appendChild(streamingEl);
+    streamingRawText = "";
+    scrollToBottom();
+    ws.send(JSON.stringify(payload));
+}
+
+// Board text input
+document.getElementById("board-input-btn").onclick = () => {
+    const val = boardInput.value.trim();
+    if (!val) return;
+    // Auto-detect links
+    const type = /^https?:\/\/\S+$/.test(val) ? "link" : "text";
+    createPin(type, val);
+    boardInput.value = "";
+};
+boardInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        document.getElementById("board-input-btn").click();
+    }
+});
+
+// Board drag and drop — images and text
+boardPanel.addEventListener("dragover", (e) => {
+    e.preventDefault();
+    boardPanel.classList.add("dragover");
+});
+boardPanel.addEventListener("dragleave", (e) => {
+    if (!boardPanel.contains(e.relatedTarget)) {
+        boardPanel.classList.remove("dragover");
+    }
+});
+boardPanel.addEventListener("drop", async (e) => {
+    e.preventDefault();
+    boardPanel.classList.remove("dragover");
+
+    // Handle files (images)
+    if (e.dataTransfer.files.length > 0) {
+        for (const file of e.dataTransfer.files) {
+            if (!file.type.startsWith("image/")) continue;
+            const reader = new FileReader();
+            reader.onload = () => {
+                createPin("image", reader.result);
+            };
+            reader.readAsDataURL(file);
+        }
+        return;
+    }
+
+    // Handle dragged text
+    const text = e.dataTransfer.getData("text/plain");
+    if (text) {
+        const type = /^https?:\/\/\S+$/.test(text) ? "link" : "text";
+        createPin(type, text);
+    }
+});
+
+// Board paste — images and text
+boardPanel.addEventListener("paste", (e) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+
+    for (const item of items) {
+        if (item.type.startsWith("image/")) {
+            e.preventDefault();
+            const file = item.getAsFile();
+            const reader = new FileReader();
+            reader.onload = () => {
+                createPin("image", reader.result);
+            };
+            reader.readAsDataURL(file);
+            return;
+        }
+    }
+
+    // If paste happened while board input is focused, let it handle normally
+    if (document.activeElement === boardInput) return;
+
+    // Otherwise paste as text pin
+    const text = e.clipboardData.getData("text/plain");
+    if (text) {
+        e.preventDefault();
+        const type = /^https?:\/\/\S+$/.test(text.trim()) ? "link" : "text";
+        createPin(type, text.trim());
+    }
+});
+
+// Make board panel focusable for paste events
+boardPanel.setAttribute("tabindex", "-1");
+
+// ---------------------------------------------------------------------------
 // Init
 // ---------------------------------------------------------------------------
 marked.setOptions({ breaks: true, gfm: true });
-appEl.classList.add("no-tree");  // hide tree panel initially
 loadModels();
 loadPrompts();
 loadFiles();
 loadAllTags();
+loadBoard();
 loadConversations().then(() => {
     // Auto-open conversation from URL parameter (e.g. brain dump redirect)
     const openId = new URLSearchParams(window.location.search).get("c");

@@ -6,7 +6,7 @@
     <title>Claude Wrapper</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/style.css?v=11">
+    <link rel="stylesheet" href="/style.css?v=13">
 </head>
 <body>
     <div id="app">
@@ -38,21 +38,6 @@
                 </div>
             </div>
 
-            <!-- Chat header -->
-            <div id="chat-header" class="chat-header" style="display:none;">
-                <div class="chat-header-left">
-                    <select id="model-select" class="select-minimal"></select>
-                    <select id="prompt-select" class="select-minimal"></select>
-                </div>
-                <div class="chat-header-right">
-                    <label class="thinking-toggle">
-                        <input type="checkbox" id="thinking-checkbox">
-                        <span>thinking</span>
-                    </label>
-                    <span id="cost-display" class="cost-display">0 tokens | $0.0000</span>
-                </div>
-            </div>
-
             <!-- Messages -->
             <div id="messages" class="messages" style="display:none;"></div>
 
@@ -73,14 +58,37 @@
                         <button id="send-btn" class="send-btn">send</button>
                         <button id="stop-btn" class="stop-btn" style="display:none;">stop</button>
                     </div>
+                    <div id="chat-controls" class="chat-controls">
+                        <select id="model-select" class="select-minimal"></select>
+                        <select id="prompt-select" class="select-minimal"></select>
+                        <label class="thinking-toggle">
+                            <input type="checkbox" id="thinking-checkbox">
+                            <span>thinking</span>
+                        </label>
+                        <span id="cost-display" class="cost-display">0 tokens | $0.0000</span>
+                    </div>
                 </div>
             </div>
         </main>
 
-        <!-- Right tree panel -->
+        <!-- Moodboard panel -->
+        <aside id="board-panel" class="board-panel">
+            <div class="board-panel-header">
+                <span class="section-label" style="margin-bottom:0;">board</span>
+            </div>
+            <div id="board-content" class="board-content">
+                <div id="board-pins" class="board-pins"></div>
+            </div>
+            <div class="board-input-area">
+                <textarea id="board-input" placeholder="pin something..." rows="1"></textarea>
+                <button id="board-input-btn" class="board-input-btn">pin</button>
+            </div>
+        </aside>
+
+        <!-- Tree panel -->
         <aside id="tree-panel" class="tree-panel" style="display:none;">
             <div class="section-label" style="padding:1rem 1rem 0.5rem;">tree</div>
-            <div id="tree-search-container" class="tree-search-container">
+            <div class="tree-search-container">
                 <input id="tree-search" class="tree-search" type="text" placeholder="search...">
             </div>
             <div id="node-map" class="node-map"></div>
@@ -119,6 +127,6 @@
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/dompurify/dist/purify.min.js"></script>
     <script src="/latex-rendering.js"></script>
-    <script src="/app.js?v=16"></script>
+    <script src="/app.js?v=18"></script>
 </body>
 </html>
