@@ -195,39 +195,14 @@ body {
 .message {
     max-width: 640px;
     width: 100%;
-    padding: 0 0 0 20px;
     position: relative;
     margin-bottom: 0;
 }
-
-/* Vertical timeline line */
-.message::before {
-    content: "";
-    position: absolute;
-    left: 8px;
-    top: 0;
-    bottom: 0;
-    width: 1px;
-    background: #ddd;
-}
-.message:first-child::before { top: 50%; }
-.message:last-child::before { bottom: 50%; }
-.message:only-child::before { display: none; }
 
 /* Spacer between messages */
 .message-spacer {
     height: 12px;
     max-width: 640px;
-    position: relative;
-}
-.message-spacer::before {
-    content: "";
-    position: absolute;
-    left: 8px;
-    top: 0;
-    bottom: 0;
-    width: 1px;
-    background: #ddd;
 }
 
 .message .role-label {
@@ -281,10 +256,11 @@ body {
     border: 1px solid #ddd;
     padding: 0.5rem;
     font-family: 'Open Sans', Helvetica, Arial, sans-serif;
-    font-size: 0.9rem;
-    resize: vertical;
+    font-size: 0.85rem;
+    resize: none;
     line-height: 1.5;
     min-height: 60px;
+    overflow: hidden;
 }
 .edit-textarea:focus { outline: none; border-color: #111; }
 .edit-actions {

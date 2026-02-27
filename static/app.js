@@ -573,15 +573,30 @@ function createMessageEl(role, index, msgId, parentId) {
     return div;
 }
 
+// Per-edit image attachments — separate from the main pendingImages
+let editPendingImages = [];
+
 function startEdit(msgEl) {
     if (isStreaming) return;
 
     // Remove any existing edit forms
     document.querySelectorAll(".edit-form").forEach(f => f.remove());
+    editPendingImages = [];
 
     const textEl = msgEl.querySelector(".message-text");
     const currentText = msgEl.dataset.rawText || textEl.textContent;
     const parentId = msgEl.dataset.parentId || null;
+
+    // Collect existing images from this message for re-attachment
+    const existingImages = msgEl.querySelectorAll(".message-image");
+    for (const img of existingImages) {
+        const src = img.src;
+        if (src.startsWith("data:")) {
+            const [header, data] = src.split(",");
+            const mediaType = header.match(/data:(.*?);/)?.[1] || "image/png";
+            editPendingImages.push({ type: "image", source: { type: "base64", media_type: mediaType, data } });
+        }
+    }
 
     const form = document.createElement("div");
     form.className = "edit-form";
@@ -591,12 +606,18 @@ function startEdit(msgEl) {
     textarea.value = currentText;
     form.appendChild(textarea);
 
+    // Image preview area
+    const previewArea = document.createElement("div");
+    previewArea.className = "image-preview-area";
+    form.appendChild(previewArea);
+    renderEditImagePreviews(previewArea);
+
     const actions = document.createElement("div");
     actions.className = "edit-actions";
 
     const cancelBtn = document.createElement("button");
     cancelBtn.textContent = "cancel";
-    cancelBtn.onclick = () => form.remove();
+    cancelBtn.onclick = () => { editPendingImages = []; form.remove(); };
     actions.appendChild(cancelBtn);
 
     const sendEditBtn = document.createElement("button");
@@ -608,7 +629,37 @@ function startEdit(msgEl) {
     form.appendChild(actions);
     msgEl.appendChild(form);
 
+    // Auto-grow textarea
+    function autoGrow() {
+        textarea.style.height = "0";
+        textarea.style.height = textarea.scrollHeight + "px";
+    }
+    textarea.addEventListener("input", autoGrow);
+
+    // Paste images into edit form
+    textarea.addEventListener("paste", (e) => {
+        const items = e.clipboardData?.items;
+        if (!items) return;
+        for (const item of items) {
+            if (item.type.startsWith("image/")) {
+                e.preventDefault();
+                const file = item.getAsFile();
+                const reader = new FileReader();
+                reader.onload = () => {
+                    const base64 = reader.result.split(",")[1];
+                    editPendingImages.push({ type: "image", source: { type: "base64", media_type: item.type, data: base64 } });
+                    renderEditImagePreviews(previewArea);
+                };
+                reader.readAsDataURL(file);
+                break;
+            }
+        }
+    });
+
     textarea.focus();
+    // Set initial height
+    requestAnimationFrame(autoGrow);
+
     textarea.addEventListener("keydown", (e) => {
         if (e.key === "Enter" && !e.shiftKey) {
             e.preventDefault();
@@ -617,8 +668,29 @@ function startEdit(msgEl) {
     });
 }
 
+function renderEditImagePreviews(container) {
+    container.innerHTML = "";
+    editPendingImages.forEach((img, i) => {
+        const wrapper = document.createElement("div");
+        wrapper.className = "image-preview";
+        const imgEl = document.createElement("img");
+        imgEl.src = `data:${img.source.media_type};base64,${img.source.data}`;
+        wrapper.appendChild(imgEl);
+        const removeBtn = document.createElement("button");
+        removeBtn.className = "remove-btn";
+        removeBtn.textContent = "\u00d7";
+        removeBtn.onclick = () => {
+            editPendingImages.splice(i, 1);
+            renderEditImagePreviews(container);
+        };
+        wrapper.appendChild(removeBtn);
+        container.appendChild(wrapper);
+    });
+}
+
 function submitEdit(parentId, newText, formEl) {
-    if (!newText || !ws || !currentConversationId || isStreaming) return;
+    const hasImages = editPendingImages.length > 0;
+    if ((!newText && !hasImages) || !ws || !currentConversationId || isStreaming) return;
 
     // Find the message element that contains this edit form, then remove
     // it and everything after it — keeps prior conversation visible.
@@ -636,21 +708,40 @@ function submitEdit(parentId, newText, formEl) {
     showStopButton();
 
     const userEl = createMessageEl("user");
-    userEl.querySelector(".message-text").textContent = newText;
+    const textEl = userEl.querySelector(".message-text");
+    if (newText) textEl.textContent = newText;
+    for (const img of editPendingImages) {
+        const imgEl = document.createElement("img");
+        imgEl.src = `data:${img.source.media_type};base64,${img.source.data}`;
+        imgEl.className = "message-image";
+        textEl.appendChild(imgEl);
+    }
     userEl.dataset.rawText = newText;
     messagesEl.appendChild(userEl);
     scrollToBottom();
 
+    // Build payload — use block list if images are present
+    let messagePayload;
+    if (hasImages) {
+        const blocks = [];
+        if (newText) blocks.push({ type: "text", text: newText });
+        blocks.push(...editPendingImages);
+        messagePayload = blocks;
+    } else {
+        messagePayload = newText;
+    }
+
     const payload = {
         action: "edit",
         parent_id: parentId,
-        message: newText,
+        message: messagePayload,
     };
     if (thinkingCheckbox && thinkingCheckbox.checked) {
         payload.thinking_budget = 10000;
     }
 
     ws.send(JSON.stringify(payload));
+    editPendingImages = [];
 }
 
 function renderConversationMessages(messages) {
@@ -912,51 +1003,50 @@ function buildTree() {
         if (pid) treeParentMap[n.id] = pid;
     }
 
-    // Layout: DFS with column assignment.
-    // Branches grow both left and right — 1st child continues straight,
-    // subsequent siblings alternate right then left of the current extent.
+    // Layout: compact tree — leaves get sequential columns left-to-right,
+    // parents center over their children. This lets branches from different
+    // parents share vertical space when they don't conflict.
     const layout = [];
-    let maxCol = 0;
-    let minCol = 0;
+    let nextLeafCol = 0;
 
-    function dfs(nodeId, depth, column, effectiveParent) {
+    function layoutDfs(nodeId, depth, effectiveParent) {
         const node = nodeById[nodeId];
-        if (!node) return;
-        layout.push({
-            ...node,
-            col: column,
-            depth: depth,
-            onPath: currentPath.has(nodeId),
-            drawParent: effectiveParent,  // visible parent for drawing connections
-        });
-        if (column > maxCol) maxCol = column;
-        if (column < minCol) minCol = column;
+        if (!node) return null;
 
         const kids = childrenMap[nodeId] || [];
-        // Keep creation order — no path-based sorting so tree layout is stable
 
-        for (let i = 0; i < kids.length; i++) {
-            if (i === 0) {
-                dfs(kids[i], depth + 1, column, nodeId);
-            } else if (i % 2 === 1) {
-                // Odd siblings go right
-                dfs(kids[i], depth + 1, maxCol + 1, nodeId);
-            } else {
-                // Even siblings go left
-                dfs(kids[i], depth + 1, minCol - 1, nodeId);
-            }
+        if (kids.length === 0) {
+            // Leaf — assign next available column
+            const col = nextLeafCol++;
+            layout.push({ ...node, col, depth, onPath: currentPath.has(nodeId), drawParent: effectiveParent });
+            return col;
         }
+
+        // Non-leaf: layout children first (post-order), then center this node
+        const childCols = [];
+        for (const kid of kids) {
+            const c = layoutDfs(kid, depth + 1, nodeId);
+            if (c !== null) childCols.push(c);
+        }
+
+        const col = childCols.length > 0
+            ? childCols.reduce((a, b) => a + b, 0) / childCols.length
+            : nextLeafCol++;
+        layout.push({ ...node, col, depth, onPath: currentPath.has(nodeId), drawParent: effectiveParent });
+        return col;
     }
 
-    dfs(rootId, 0, 0, null);
+    layoutDfs(rootId, 0, null);
 
-    // Render — use depth for Y so branch siblings share a row
+    // Render — use depth for Y, col for X
     const layerGap = 28;
     const colGap = 24;
     const startY = 16;
-    const baseX = 40;
+    const baseX = 16;
     const nodeRadius = { user: 6, assistant: 4 };
 
+    const minCol = Math.min(...layout.map(n => n.col));
+    const maxCol = Math.max(...layout.map(n => n.col));
     const maxDepth = Math.max(...layout.map(n => n.depth));
     const totalHeight = startY + (maxDepth + 1) * layerGap + 20;
     const totalWidth = baseX + (maxCol - minCol + 1) * colGap + 40;
@@ -974,7 +1064,7 @@ function buildTree() {
     spacerDiv.style.pointerEvents = "none";
     nodeMap.appendChild(spacerDiv);
 
-    // Position map — Y from depth, X from column (offset by minCol so leftmost col starts at baseX)
+    // Position map — Y from depth, X from column
     const posMap = {};
     layout.forEach((item) => {
         const x = baseX + (item.col - minCol) * colGap;

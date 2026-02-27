@@ -188,39 +188,14 @@ body {
 .message {
     max-width: 640px;
     width: 100%;
-    padding: 0 0 0 20px;
     position: relative;
     margin-bottom: 0;
 }
-
-/* Vertical timeline line */
-.message::before {
-    content: "";
-    position: absolute;
-    left: 8px;
-    top: 0;
-    bottom: 0;
-    width: 1px;
-    background: #ddd;
-}
-.message:first-child::before { top: 50%; }
-.message:last-child::before { bottom: 50%; }
-.message:only-child::before { display: none; }
 
 /* Spacer between messages */
 .message-spacer {
     height: 24px;
     max-width: 640px;
-    position: relative;
-}
-.message-spacer::before {
-    content: "";
-    position: absolute;
-    left: 8px;
-    top: 0;
-    bottom: 0;
-    width: 1px;
-    background: #ddd;
 }
 
 /* Speaker labels */

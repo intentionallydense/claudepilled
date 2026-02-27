@@ -785,14 +785,28 @@ function chatRenderToolCallBlock(parentEl, toolCall) {
 // Chat panel — edit messages
 // ------------------------------------------------------------------
 
+let chatEditPendingImages = [];
+
 function chatStartEdit(msgEl) {
     if (chatIsStreaming) return;
 
     document.querySelectorAll("#chat-panel .edit-form").forEach(f => f.remove());
+    chatEditPendingImages = [];
 
     const textEl = msgEl.querySelector(".message-text");
     const currentText = msgEl.dataset.rawText || textEl.textContent;
     const parentId = msgEl.dataset.parentId || null;
+
+    // Collect existing images from this message for re-attachment
+    const existingImages = msgEl.querySelectorAll(".message-image");
+    for (const img of existingImages) {
+        const src = img.src;
+        if (src.startsWith("data:")) {
+            const [header, data] = src.split(",");
+            const mediaType = header.match(/data:(.*?);/)?.[1] || "image/png";
+            chatEditPendingImages.push({ type: "image", source: { type: "base64", media_type: mediaType, data } });
+        }
+    }
 
     const form = document.createElement("div");
     form.className = "edit-form";
@@ -802,12 +816,18 @@ function chatStartEdit(msgEl) {
     textarea.value = currentText;
     form.appendChild(textarea);
 
+    // Image preview area
+    const previewArea = document.createElement("div");
+    previewArea.className = "image-preview-area";
+    form.appendChild(previewArea);
+    chatRenderEditImagePreviews(previewArea);
+
     const actions = document.createElement("div");
     actions.className = "edit-actions";
 
     const cancelBtn = document.createElement("button");
     cancelBtn.textContent = "cancel";
-    cancelBtn.onclick = () => form.remove();
+    cancelBtn.onclick = () => { chatEditPendingImages = []; form.remove(); };
     actions.appendChild(cancelBtn);
 
     const sendEditBtn = document.createElement("button");
@@ -819,7 +839,36 @@ function chatStartEdit(msgEl) {
     form.appendChild(actions);
     msgEl.appendChild(form);
 
+    // Auto-grow textarea
+    function autoGrow() {
+        textarea.style.height = "0";
+        textarea.style.height = textarea.scrollHeight + "px";
+    }
+    textarea.addEventListener("input", autoGrow);
+
+    // Paste images into edit form
+    textarea.addEventListener("paste", (e) => {
+        const items = e.clipboardData?.items;
+        if (!items) return;
+        for (const item of items) {
+            if (item.type.startsWith("image/")) {
+                e.preventDefault();
+                const file = item.getAsFile();
+                const reader = new FileReader();
+                reader.onload = () => {
+                    const base64 = reader.result.split(",")[1];
+                    chatEditPendingImages.push({ type: "image", source: { type: "base64", media_type: item.type, data: base64 } });
+                    chatRenderEditImagePreviews(previewArea);
+                };
+                reader.readAsDataURL(file);
+                break;
+            }
+        }
+    });
+
     textarea.focus();
+    requestAnimationFrame(autoGrow);
+
     textarea.addEventListener("keydown", (e) => {
         if (e.key === "Enter" && !e.shiftKey) {
             e.preventDefault();
@@ -828,8 +877,29 @@ function chatStartEdit(msgEl) {
     });
 }
 
+function chatRenderEditImagePreviews(container) {
+    container.innerHTML = "";
+    chatEditPendingImages.forEach((img, i) => {
+        const wrapper = document.createElement("div");
+        wrapper.className = "image-preview";
+        const imgEl = document.createElement("img");
+        imgEl.src = `data:${img.source.media_type};base64,${img.source.data}`;
+        wrapper.appendChild(imgEl);
+        const removeBtn = document.createElement("button");
+        removeBtn.className = "remove-btn";
+        removeBtn.textContent = "\u00d7";
+        removeBtn.onclick = () => {
+            chatEditPendingImages.splice(i, 1);
+            chatRenderEditImagePreviews(container);
+        };
+        wrapper.appendChild(removeBtn);
+        container.appendChild(wrapper);
+    });
+}
+
 function chatSubmitEdit(parentId, newText, formEl) {
-    if (!newText || !chatWs || !chatConversationId || chatIsStreaming) return;
+    const hasImages = chatEditPendingImages.length > 0;
+    if ((!newText && !hasImages) || !chatWs || !chatConversationId || chatIsStreaming) return;
 
     // Remove the edited message and everything after it
     const editedMsg = formEl.closest(".message");
@@ -847,15 +917,33 @@ function chatSubmitEdit(parentId, newText, formEl) {
     // Show the user's edited text
     const messagesEl = document.getElementById("chat-messages");
     const userEl = chatCreateMessageEl("user");
-    userEl.querySelector(".message-text").textContent = newText;
+    const editTextEl = userEl.querySelector(".message-text");
+    if (newText) editTextEl.textContent = newText;
+    for (const img of chatEditPendingImages) {
+        const imgEl = document.createElement("img");
+        imgEl.src = `data:${img.source.media_type};base64,${img.source.data}`;
+        imgEl.className = "message-image";
+        editTextEl.appendChild(imgEl);
+    }
     userEl.dataset.rawText = newText;
     messagesEl.appendChild(userEl);
     chatScrollToBottom();
 
+    // Build payload — use block list if images are present
+    let messagePayload;
+    if (hasImages) {
+        const blocks = [];
+        if (newText) blocks.push({ type: "text", text: newText });
+        blocks.push(...chatEditPendingImages);
+        messagePayload = blocks;
+    } else {
+        messagePayload = newText;
+    }
+
     const payload = {
         action: "edit",
         parent_id: parentId,
-        message: newText,
+        message: messagePayload,
     };
     const thinkingCb = document.getElementById("chat-thinking-checkbox");
     if (thinkingCb && thinkingCb.checked) {
@@ -863,6 +951,7 @@ function chatSubmitEdit(parentId, newText, formEl) {
     }
 
     chatWs.send(JSON.stringify(payload));
+    chatEditPendingImages = [];
 }
 
 // ------------------------------------------------------------------
@@ -1097,46 +1186,46 @@ function chatBuildTree() {
         if (pid) chatTreeParentMap[n.id] = pid;
     }
 
-    // Layout: DFS with column assignment.
-    // Branches grow both left and right — 1st child continues straight,
-    // subsequent siblings alternate right then left of the current extent.
+    // Layout: compact tree — leaves get sequential columns, parents center
+    // over their children. Allows branches to share vertical space.
     const layout = [];
-    let maxCol = 0;
-    let minCol = 0;
+    let nextLeafCol = 0;
 
-    function dfs(nodeId, depth, column, effectiveParent) {
+    function layoutDfs(nodeId, depth, effectiveParent) {
         const node = nodeById[nodeId];
-        if (!node) return;
-        layout.push({
-            ...node,
-            col: column,
-            depth: depth,
-            onPath: currentPath.has(nodeId),
-            drawParent: effectiveParent,
-        });
-        if (column > maxCol) maxCol = column;
-        if (column < minCol) minCol = column;
+        if (!node) return null;
 
         const kids = childrenMap[nodeId] || [];
-        for (let i = 0; i < kids.length; i++) {
-            if (i === 0) {
-                dfs(kids[i], depth + 1, column, nodeId);
-            } else if (i % 2 === 1) {
-                dfs(kids[i], depth + 1, maxCol + 1, nodeId);
-            } else {
-                dfs(kids[i], depth + 1, minCol - 1, nodeId);
-            }
+
+        if (kids.length === 0) {
+            const col = nextLeafCol++;
+            layout.push({ ...node, col, depth, onPath: currentPath.has(nodeId), drawParent: effectiveParent });
+            return col;
         }
+
+        const childCols = [];
+        for (const kid of kids) {
+            const c = layoutDfs(kid, depth + 1, nodeId);
+            if (c !== null) childCols.push(c);
+        }
+
+        const col = childCols.length > 0
+            ? childCols.reduce((a, b) => a + b, 0) / childCols.length
+            : nextLeafCol++;
+        layout.push({ ...node, col, depth, onPath: currentPath.has(nodeId), drawParent: effectiveParent });
+        return col;
     }
 
-    dfs(rootId, 0, 0, null);
+    layoutDfs(rootId, 0, null);
 
     const layerGap = 24;
     const colGap = 18;
     const startY = 12;
-    const baseX = 24;
+    const baseX = 12;
     const nodeRadius = { user: 5, assistant: 3 };
 
+    const minCol = Math.min(...layout.map(n => n.col));
+    const maxCol = Math.max(...layout.map(n => n.col));
     const maxDepth = Math.max(...layout.map(n => n.depth));
     const totalHeight = startY + (maxDepth + 1) * layerGap + 16;
     const totalWidth = baseX + (maxCol - minCol + 1) * colGap + 24;
