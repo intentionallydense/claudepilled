@@ -1456,7 +1456,9 @@ function chatRenderMarkdown(text) {
     if (fenceCount % 2 !== 0) {
         processed += "\n```";
     }
-    return DOMPurify.sanitize(marked.parse(processed));
+    processed = extractLatex(processed);
+    const html = DOMPurify.sanitize(marked.parse(processed));
+    return restoreLatex(html);
 }
 
 function chatAppendStreamingCursor(el) {

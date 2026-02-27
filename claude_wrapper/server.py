@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
 import importlib.util
 import json
 import os
 import sys
 import uuid
+from collections.abc import AsyncGenerator
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -219,8 +221,36 @@ async def list_tools():
 
 
 # ---------------------------------------------------------------------------
-# WebSocket streaming
+# WebSocket streaming — background task pattern
 # ---------------------------------------------------------------------------
+# Streams run in asyncio.Tasks so they complete (and save to DB) even if
+# the WebSocket disconnects mid-stream.  The WS handler reads from a Queue.
+
+_active_chat_tasks: dict[str, asyncio.Task] = {}
+_active_couch_tasks: dict[str, asyncio.Task] = {}
+
+
+async def _run_stream_to_completion(
+    generator: AsyncGenerator,
+    queue: asyncio.Queue,
+    task_dict: dict[str, asyncio.Task],
+    key: str,
+) -> None:
+    """Consume a streaming generator to completion, pushing events to queue."""
+    try:
+        async for event in generator:
+            await queue.put(event.to_ws_json())
+    except asyncio.CancelledError:
+        pass
+    except Exception as exc:
+        await queue.put({
+            "type": StreamEventType.ERROR.value,
+            "error": str(exc),
+        })
+    finally:
+        await queue.put(None)  # sentinel: stream is done
+        task_dict.pop(key, None)
+
 
 @app.websocket("/api/chat/{conversation_id}")
 async def websocket_chat(ws: WebSocket, conversation_id: str):
@@ -279,25 +309,38 @@ async def websocket_chat(ws: WebSocket, conversation_id: str):
                 parent_id = payload.get("parent_id") or None
                 if not user_text and not isinstance(user_message, list):
                     continue
-                async for event in manager.edit_message(
+                gen = manager.edit_message(
                     conversation_id,
                     parent_id=parent_id,
                     new_content=user_message,
                     thinking_budget=thinking_budget,
-                ):
-                    await ws.send_text(json.dumps(event.to_ws_json()))
+                )
             else:
                 if not user_text and not isinstance(user_message, list):
                     continue
-                async for event in manager.stream_chat(
+                gen = manager.stream_chat(
                     conversation_id,
                     user_message,
                     thinking_budget=thinking_budget,
-                ):
-                    await ws.send_text(json.dumps(event.to_ws_json()))
+                )
+
+            # Run stream in background task so it completes even if WS drops
+            queue: asyncio.Queue = asyncio.Queue()
+            task = asyncio.create_task(
+                _run_stream_to_completion(
+                    gen, queue, _active_chat_tasks, conversation_id,
+                )
+            )
+            _active_chat_tasks[conversation_id] = task
+
+            while True:
+                event_data = await queue.get()
+                if event_data is None:
+                    break
+                await ws.send_text(json.dumps(event_data))
 
     except WebSocketDisconnect:
-        pass
+        pass  # background task keeps running, message will be saved
     except Exception as exc:
         try:
             await ws.send_text(json.dumps({
@@ -501,11 +544,24 @@ async def websocket_couch(ws: WebSocket, session_id: str):
             if not has_content:
                 continue
 
-            async for event in couch.stream_turns(session_id, content, input_type):
-                await ws.send_text(json.dumps(event.to_ws_json()))
+            # Run stream in background task so it completes even if WS drops
+            queue: asyncio.Queue = asyncio.Queue()
+            gen = couch.stream_turns(session_id, content, input_type)
+            task = asyncio.create_task(
+                _run_stream_to_completion(
+                    gen, queue, _active_couch_tasks, session_id,
+                )
+            )
+            _active_couch_tasks[session_id] = task
+
+            while True:
+                event_data = await queue.get()
+                if event_data is None:
+                    break
+                await ws.send_text(json.dumps(event_data))
 
     except WebSocketDisconnect:
-        pass
+        pass  # background task keeps running, messages will be saved
     except Exception as exc:
         try:
             await ws.send_text(json.dumps({
