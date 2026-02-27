@@ -37,13 +37,10 @@ A one-line greeting referencing the day of the week and date.
 List all FT headlines as bullet points. For each, one sentence on what it means
 or why it matters. If the feed is empty, say so briefly.
 
-## Chemistry
-Pick the most interesting 2-3 items from the chemistry news. One sentence each,
-plus why it matters. Skip if empty.
-
-## Physics
-Pick the most interesting 2-3 items from the physics news. One sentence each,
-plus why it matters. Skip if empty.
+## Science
+Pick the most interesting 2-3 items from the science news. One sentence each,
+plus why it matters. Note the source (Nature Chemistry, C&EN, or Nature Physics).
+Chemistry and physics alternate by day. Skip if empty.
 
 ## Today's Read
 Present the long read recommendation with a 2-3 sentence hook explaining
@@ -129,11 +126,15 @@ def _gather_sections(briefing_db: BriefingDatabase, task_db: TaskDatabase) -> di
     # FT headlines
     sections["ft_headlines"] = fetch_ft_headlines(max_items=10)
 
-    # Chemistry news (Nature Chemistry deduped via shown_posts)
-    sections["chemistry_news"] = fetch_chemistry_news(briefing_db, max_items=5)
-
-    # Physics news (Nature Physics deduped via shown_posts)
-    sections["physics_news"] = fetch_physics_news(briefing_db, max_items=5)
+    # Science news — chemistry/physics alternate by day-of-year parity
+    # (same pattern as Gwern/ACX long read alternation)
+    day = today.timetuple().tm_yday
+    if day % 2 == 0:
+        sections["science_news"] = fetch_chemistry_news(briefing_db, max_items=5)
+        sections["science_topic"] = "chemistry"
+    else:
+        sections["science_news"] = fetch_physics_news(briefing_db, max_items=5)
+        sections["science_topic"] = "physics"
 
     # ACX RSS check (before long read, so we can pass new post)
     acx_new = check_acx_new_posts(briefing_db)
