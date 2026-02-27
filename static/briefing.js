@@ -20,7 +20,18 @@ let chatStreamingToolCalls = {};
 let chatStreamingSearchEl = null;
 let chatTreeData = null;
 let chatTreeNodes = [];
+let chatTreeChildrenMap = {};  // parent_id → [child_id, ...] (visible nodes only)
+let chatTreeParentMap = {};    // child_id → parent_id (visible parent)
 let chatCurrentHighlight = null;
+let chatArrowNavActive = false; // suppresses scroll↔tree sync during keyboard nav
+let chatArrowNavTimer = null;
+let chatPendingImages = [];
+
+// Markdown streaming state
+let chatStreamingRawText = "";
+let chatMarkdownRenderTimer = null;
+const CHAT_MARKDOWN_DEBOUNCE_MS = 80;
+let chatToolResultsSinceLastText = false;
 
 // ------------------------------------------------------------------
 // API helpers
@@ -258,6 +269,8 @@ function hideChat() {
     chatConversationId = null;
     chatTreeData = null;
     chatTreeNodes = [];
+    chatTreeChildrenMap = {};
+    chatTreeParentMap = {};
 }
 
 function showChat() {
@@ -299,10 +312,16 @@ async function chatLoadConversation(conversationId) {
         );
 
         let renderedCount = 0;
+        let lastAssistantEl = null;
         for (let i = 0; i < conv.messages.length; i++) {
             const msg = conv.messages[i];
             const content = msg.content;
             if (Array.isArray(content) && content.every(b => b.type === "tool_result")) {
+                continue;
+            }
+            // Merge consecutive assistant messages (from tool use loops)
+            if (msg.role === "assistant" && lastAssistantEl) {
+                chatAppendAssistantContent(lastAssistantEl, content);
                 continue;
             }
             if (renderedCount > 0) {
@@ -310,7 +329,8 @@ async function chatLoadConversation(conversationId) {
                 spacer.className = "message-spacer";
                 messagesEl.appendChild(spacer);
             }
-            chatRenderMessage(msg.role, content, i, msg.id, msg.parent_id);
+            const el = chatRenderMessage(msg.role, content, i, msg.id, msg.parent_id);
+            lastAssistantEl = (msg.role === "assistant") ? el : null;
             renderedCount++;
         }
         chatScrollToBottom();
@@ -352,7 +372,7 @@ function handleChatStreamEvent(event) {
             const tc = chatStreamingThinkingEl.querySelector(".thinking-content");
             tc.textContent += event.thinking;
             tc.classList.add("streaming-cursor");
-            chatScrollToBottom();
+            chatMaybeScrollToBottom();
             break;
 
         case "thinking_done":
@@ -372,7 +392,7 @@ function handleChatStreamEvent(event) {
             chatStreamingSearchEl.textContent = "searching the web...";
             const textElBefore = chatStreamingEl.querySelector(".message-text");
             chatStreamingEl.insertBefore(chatStreamingSearchEl, textElBefore);
-            chatScrollToBottom();
+            chatMaybeScrollToBottom();
             break;
 
         case "web_search_result":
@@ -389,9 +409,17 @@ function handleChatStreamEvent(event) {
 
         case "text_delta":
             if (!chatStreamingEl) chatStartStreamingMessage();
-            chatStreamingTextEl.textContent += event.text;
-            chatStreamingTextEl.classList.add("streaming-cursor");
-            chatScrollToBottom();
+            // After tool results, create a new text element below the tool blocks
+            if (chatToolResultsSinceLastText) {
+                chatStreamingTextEl = document.createElement("div");
+                chatStreamingTextEl.className = "message-text";
+                chatStreamingEl.appendChild(chatStreamingTextEl);
+                chatStreamingRawText = "";
+                chatToolResultsSinceLastText = false;
+            }
+            chatStreamingRawText += event.text;
+            chatScheduleMarkdownRender();
+            chatMaybeScrollToBottom();
             break;
 
         case "tool_use_start":
@@ -416,10 +444,11 @@ function handleChatStreamEvent(event) {
             break;
 
         case "tool_result":
+            chatToolResultsSinceLastText = true;
             if (event.tool_use_id && chatStreamingToolCalls[event.tool_use_id]) {
                 chatStreamingToolCalls[event.tool_use_id].result = event.tool_result;
                 chatRenderToolCallBlock(chatStreamingEl, chatStreamingToolCalls[event.tool_use_id]);
-                chatScrollToBottom();
+                chatMaybeScrollToBottom();
             }
             break;
 
@@ -430,9 +459,14 @@ function handleChatStreamEvent(event) {
             break;
 
         case "message_done":
-            if (chatStreamingTextEl) {
-                chatStreamingTextEl.classList.remove("streaming-cursor");
+            // Final markdown render
+            if (chatMarkdownRenderTimer) clearTimeout(chatMarkdownRenderTimer);
+            if (chatStreamingTextEl && chatStreamingRawText) {
+                chatStreamingTextEl.innerHTML = chatRenderMarkdown(chatStreamingRawText);
+                chatRemoveStreamingCursor(chatStreamingTextEl);
             }
+            chatStreamingRawText = "";
+            chatMarkdownRenderTimer = null;
             if (chatStreamingSearchEl) {
                 chatStreamingSearchEl.remove();
                 chatStreamingSearchEl = null;
@@ -442,20 +476,25 @@ function handleChatStreamEvent(event) {
                     chatRenderToolCallBlock(chatStreamingEl, toolCall);
                 }
             }
+
+            const wasEdit = chatIsEditing;
             chatStreamingEl = null;
             chatStreamingTextEl = null;
             chatStreamingThinkingEl = null;
             chatStreamingToolCalls = {};
+            chatToolResultsSinceLastText = false;
             chatIsStreaming = false;
+            chatIsEditing = false;
             inputEl.disabled = false;
             sendBtn.disabled = false;
-            inputEl.focus();
-            chatFetchAndUpdateCost();
-            chatLoadTree();
 
-            if (chatIsEditing) {
-                chatIsEditing = false;
+            if (wasEdit) {
                 chatLoadConversation(chatConversationId);
+            } else {
+                inputEl.focus();
+                chatFetchAndUpdateCost();
+                chatScrollToBottom();
+                chatLoadTree();
             }
             break;
 
@@ -472,7 +511,7 @@ function handleChatStreamEvent(event) {
                 inputEl.disabled = false;
                 sendBtn.disabled = false;
             }
-            chatScrollToBottom();
+            chatMaybeScrollToBottom();
             break;
     }
 }
@@ -498,7 +537,7 @@ function chatCreateMessageEl(role, index, msgId, parentId) {
     div.className = `message ${role}`;
     if (index !== undefined) div.dataset.msgIndex = index;
     if (msgId) div.dataset.msgId = msgId;
-    if (parentId) div.dataset.parentId = parentId;
+    div.dataset.parentId = parentId || "";
 
     const label = document.createElement("div");
     label.className = "role-label";
@@ -532,8 +571,14 @@ function chatRenderMessage(role, content, index, msgId, parentId) {
     const textEl = el.querySelector(".message-text");
 
     if (typeof content === "string") {
-        textEl.textContent = content;
+        if (role === "assistant") {
+            textEl.innerHTML = chatRenderMarkdown(content);
+        } else {
+            textEl.textContent = content;
+            el.dataset.rawText = content;
+        }
     } else if (Array.isArray(content)) {
+        const textParts = [];
         for (const block of content) {
             if (block.type === "thinking" && block.thinking) {
                 const thinkingBlock = chatCreateThinkingBlock(el);
@@ -542,18 +587,69 @@ function chatRenderMessage(role, content, index, msgId, parentId) {
                 thinkingBlock.querySelector(".thinking-header").classList.remove("open");
                 thinkingBlock.querySelector(".thinking-body").classList.remove("open");
             } else if (block.type === "text" && block.text) {
-                textEl.textContent += block.text;
+                textParts.push(block.text);
             } else if (block.type === "tool_use") {
                 chatRenderToolCallBlock(el, {
                     name: block.name,
                     input: block.input,
                     result: null,
                 });
+            } else if (block.type === "image" && block.source) {
+                const img = document.createElement("img");
+                img.src = `data:${block.source.media_type};base64,${block.source.data}`;
+                img.className = "message-image";
+                textEl.appendChild(img);
+            }
+        }
+        if (textParts.length > 0) {
+            const fullText = textParts.join("");
+            if (role === "assistant") {
+                textEl.innerHTML = chatRenderMarkdown(fullText);
+            } else {
+                const textNode = document.createTextNode(fullText);
+                textEl.insertBefore(textNode, textEl.firstChild);
+                el.dataset.rawText = fullText;
             }
         }
     }
 
     document.getElementById("chat-messages").appendChild(el);
+    return el;
+}
+
+// Append content from a continuation assistant message (after tool use loop)
+// into an existing assistant message element
+function chatAppendAssistantContent(el, content) {
+    if (!Array.isArray(content)) return;
+    const textParts = [];
+    for (const block of content) {
+        if (block.type === "thinking" && block.thinking) {
+            const thinkingBlock = chatCreateThinkingBlock(el);
+            thinkingBlock.querySelector(".thinking-content").textContent = block.thinking;
+            thinkingBlock.querySelector(".thinking-label").textContent = "thought process";
+            thinkingBlock.querySelector(".thinking-header").classList.remove("open");
+            thinkingBlock.querySelector(".thinking-body").classList.remove("open");
+        } else if (block.type === "text" && block.text) {
+            textParts.push(block.text);
+        } else if (block.type === "tool_use") {
+            chatRenderToolCallBlock(el, {
+                name: block.name,
+                input: block.input,
+                result: null,
+            });
+        } else if (block.type === "image" && block.source) {
+            const img = document.createElement("img");
+            img.src = `data:${block.source.media_type};base64,${block.source.data}`;
+            img.className = "message-image";
+            el.querySelector(".message-text").appendChild(img);
+        }
+    }
+    if (textParts.length > 0) {
+        const newTextEl = document.createElement("div");
+        newTextEl.className = "message-text";
+        newTextEl.innerHTML = chatRenderMarkdown(textParts.join(""));
+        el.appendChild(newTextEl);
+    }
 }
 
 function chatCreateThinkingBlock(parentEl) {
@@ -639,7 +735,7 @@ function chatStartEdit(msgEl) {
     document.querySelectorAll("#chat-panel .edit-form").forEach(f => f.remove());
 
     const textEl = msgEl.querySelector(".message-text");
-    const currentText = textEl.textContent;
+    const currentText = msgEl.dataset.rawText || textEl.textContent;
     const parentId = msgEl.dataset.parentId || null;
 
     const form = document.createElement("div");
@@ -678,12 +774,27 @@ function chatStartEdit(msgEl) {
 
 function chatSubmitEdit(parentId, newText, formEl) {
     if (!newText || !chatWs || !chatConversationId || chatIsStreaming) return;
+
+    // Remove the edited message and everything after it
+    const editedMsg = formEl.closest(".message");
     formEl.remove();
+    if (editedMsg) {
+        while (editedMsg.nextSibling) editedMsg.nextSibling.remove();
+        editedMsg.remove();
+    }
 
     chatIsStreaming = true;
     chatIsEditing = true;
     document.getElementById("chat-input").disabled = true;
     document.getElementById("chat-send").disabled = true;
+
+    // Show the user's edited text
+    const messagesEl = document.getElementById("chat-messages");
+    const userEl = chatCreateMessageEl("user");
+    userEl.querySelector(".message-text").textContent = newText;
+    userEl.dataset.rawText = newText;
+    messagesEl.appendChild(userEl);
+    chatScrollToBottom();
 
     const payload = {
         action: "edit",
@@ -707,7 +818,8 @@ function sendChatMessage() {
     const sendBtn = document.getElementById("chat-send");
     const messagesEl = document.getElementById("chat-messages");
     const text = inputEl.value.trim();
-    if (!text || chatIsStreaming || !chatWs || !chatConversationId) return;
+    const hasImages = chatPendingImages.length > 0;
+    if ((!text && !hasImages) || chatIsStreaming || !chatWs || !chatConversationId) return;
 
     if (messagesEl.children.length > 0) {
         const spacer = document.createElement("div");
@@ -716,11 +828,29 @@ function sendChatMessage() {
     }
 
     const userEl = chatCreateMessageEl("user");
-    userEl.querySelector(".message-text").textContent = text;
+    const textEl = userEl.querySelector(".message-text");
+    if (text) textEl.textContent = text;
+    for (const img of chatPendingImages) {
+        const imgEl = document.createElement("img");
+        imgEl.src = `data:${img.source.media_type};base64,${img.source.data}`;
+        imgEl.className = "message-image";
+        textEl.appendChild(imgEl);
+    }
     messagesEl.appendChild(userEl);
     chatScrollToBottom();
 
-    const payload = { message: text };
+    // Build payload — use block list if images are present
+    let messagePayload;
+    if (hasImages) {
+        const blocks = [];
+        if (text) blocks.push({ type: "text", text: text });
+        blocks.push(...chatPendingImages);
+        messagePayload = blocks;
+    } else {
+        messagePayload = text;
+    }
+
+    const payload = { message: messagePayload };
     const thinkingCb = document.getElementById("chat-thinking-checkbox");
     if (thinkingCb && thinkingCb.checked) {
         payload.thinking_budget = 10000;
@@ -728,6 +858,7 @@ function sendChatMessage() {
 
     chatWs.send(JSON.stringify(payload));
     inputEl.value = "";
+    clearBriefingImagePreviews();
     chatAutoResizeInput();
     chatIsStreaming = true;
     sendBtn.disabled = true;
@@ -785,13 +916,32 @@ function chatBuildTree() {
     const nodes = chatTreeData.nodes;
     const currentPath = new Set(chatTreeData.current_path || []);
 
-    // Build children map, skipping tool_result nodes
-    const toolResultIds = new Set();
+    // Build children map, skipping nodes that don't appear in the chat:
+    // 1. tool_result nodes (user role + empty preview)
+    // 2. continuation assistant nodes (assistant following a tool_result,
+    //    which the chat merges into the previous assistant message)
+    // Skipped nodes' children get re-parented to the nearest visible ancestor.
+    const skippedIds = new Set();
     const parentOf = {};
+    const roleOf = {};
     for (const n of nodes) {
         parentOf[n.id] = n.parent_id;
+        roleOf[n.id] = n.role;
         if (n.role === "user" && n.parent_id && !n.preview) {
-            toolResultIds.add(n.id);
+            skippedIds.add(n.id);
+        }
+    }
+    // Mark continuation assistants: their parent is a tool_result whose
+    // parent is an assistant — i.e. they're part of a tool-use loop.
+    for (const n of nodes) {
+        if (n.role !== "assistant" || !n.parent_id) continue;
+        if (!skippedIds.has(n.parent_id)) continue;
+        let ancestor = n.parent_id;
+        while (ancestor && skippedIds.has(ancestor)) {
+            ancestor = parentOf[ancestor];
+        }
+        if (ancestor && roleOf[ancestor] === "assistant") {
+            skippedIds.add(n.id);
         }
     }
 
@@ -799,11 +949,12 @@ function chatBuildTree() {
     const nodeById = {};
     let rootId = null;
     for (const n of nodes) {
-        if (toolResultIds.has(n.id)) continue;
+        if (skippedIds.has(n.id)) continue;
         nodeById[n.id] = n;
 
+        // Re-parent if our parent was a skipped node
         let pid = n.parent_id;
-        while (pid && toolResultIds.has(pid)) {
+        while (pid && skippedIds.has(pid)) {
             pid = parentOf[pid];
         }
 
@@ -817,10 +968,26 @@ function chatBuildTree() {
 
     if (!rootId) return;
 
+    // Expose topology for keyboard navigation
+    chatTreeChildrenMap = childrenMap;
+    chatTreeParentMap = {};
+    for (const n of nodes) {
+        if (skippedIds.has(n.id)) continue;
+        let pid = n.parent_id;
+        while (pid && skippedIds.has(pid)) {
+            pid = parentOf[pid];
+        }
+        if (pid) chatTreeParentMap[n.id] = pid;
+    }
+
+    // Layout: DFS with column assignment.
+    // Branches grow both left and right — 1st child continues straight,
+    // subsequent siblings alternate right then left of the current extent.
     const layout = [];
     let maxCol = 0;
+    let minCol = 0;
 
-    function dfs(nodeId, depth, column) {
+    function dfs(nodeId, depth, column, effectiveParent) {
         const node = nodeById[nodeId];
         if (!node) return;
         layout.push({
@@ -828,22 +995,24 @@ function chatBuildTree() {
             col: column,
             depth: depth,
             onPath: currentPath.has(nodeId),
+            drawParent: effectiveParent,
         });
         if (column > maxCol) maxCol = column;
+        if (column < minCol) minCol = column;
 
         const kids = childrenMap[nodeId] || [];
-        let col = column;
         for (let i = 0; i < kids.length; i++) {
             if (i === 0) {
-                dfs(kids[i], depth + 1, column);
+                dfs(kids[i], depth + 1, column, nodeId);
+            } else if (i % 2 === 1) {
+                dfs(kids[i], depth + 1, maxCol + 1, nodeId);
             } else {
-                col = maxCol + 1;
-                dfs(kids[i], depth + 1, col);
+                dfs(kids[i], depth + 1, minCol - 1, nodeId);
             }
         }
     }
 
-    dfs(rootId, 0, 0);
+    dfs(rootId, 0, 0, null);
 
     const layerGap = 24;
     const colGap = 18;
@@ -853,8 +1022,7 @@ function chatBuildTree() {
 
     const maxDepth = Math.max(...layout.map(n => n.depth));
     const totalHeight = startY + (maxDepth + 1) * layerGap + 16;
-    const totalWidth = baseX + (maxCol + 1) * colGap + 24;
-    nodeMap.style.minHeight = totalHeight + "px";
+    const totalWidth = baseX + (maxCol - minCol + 1) * colGap + 24;
 
     const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
     svg.setAttribute("width", Math.max(totalWidth, 100));
@@ -864,26 +1032,56 @@ function chatBuildTree() {
     svg.style.left = "0";
     nodeMap.appendChild(svg);
 
+    // Normal-flow spacer so the container has scrollable height
+    const spacerDiv = document.createElement("div");
+    spacerDiv.style.height = totalHeight + "px";
+    spacerDiv.style.pointerEvents = "none";
+    nodeMap.appendChild(spacerDiv);
+
+    // Position map — Y from depth, X from column (offset by minCol)
     const posMap = {};
     layout.forEach((item) => {
-        const x = baseX + item.col * colGap;
+        const x = baseX + (item.col - minCol) * colGap;
         const y = startY + item.depth * layerGap;
         posMap[item.id] = { x, y };
     });
 
-    // Draw connections
+    // Draw connections (using drawParent — the visible parent after skipping)
     for (const item of layout) {
-        if (item.parent_id && posMap[item.parent_id] && posMap[item.id]) {
-            const p = posMap[item.parent_id];
+        if (item.drawParent && posMap[item.drawParent] && posMap[item.id]) {
+            const p = posMap[item.drawParent];
             const c = posMap[item.id];
             const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
             const midY = (p.y + c.y) / 2;
             path.setAttribute("d", `M${p.x},${p.y} C${p.x},${midY} ${c.x},${midY} ${c.x},${c.y}`);
-            path.setAttribute("stroke", item.onPath && currentPath.has(item.parent_id) ? "#111" : "#ccc");
+            path.setAttribute("stroke", item.onPath && currentPath.has(item.drawParent) ? "#111" : "#ccc");
             path.setAttribute("stroke-width", item.onPath ? "1.5" : "1");
             path.setAttribute("fill", "none");
             svg.appendChild(path);
         }
+    }
+
+    // Draw depth indicator lines every 10 exchanges
+    const svgWidth = Math.max(totalWidth, 100);
+    for (let d = 10; d <= maxDepth; d += 10) {
+        const y = startY + d * layerGap;
+        const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+        line.setAttribute("x1", 0);
+        line.setAttribute("y1", y);
+        line.setAttribute("x2", svgWidth);
+        line.setAttribute("y2", y);
+        line.setAttribute("stroke", "#eee");
+        line.setAttribute("stroke-width", "1");
+        svg.appendChild(line);
+
+        const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
+        label.setAttribute("x", 4);
+        label.setAttribute("y", y - 3);
+        label.setAttribute("fill", "#ccc");
+        label.setAttribute("font-size", "9px");
+        label.setAttribute("font-family", "inherit");
+        label.textContent = String(d);
+        svg.appendChild(label);
     }
 
     // Draw nodes
@@ -906,7 +1104,7 @@ function chatBuildTree() {
         chatTreeNodes.push({
             id: item.id, index: i, role: item.role,
             preview: item.preview, x: pos.x, y: pos.y,
-            el: node, onPath: item.onPath,
+            depth: item.depth, el: node, onPath: item.onPath,
         });
     });
 }
@@ -959,7 +1157,9 @@ function chatHighlightTreeNode(index) {
     }
 }
 
+// Suppressed during arrow-key navigation to avoid fighting the highlight.
 function chatSyncTreeWithScroll() {
+    if (chatArrowNavActive) return;
     const messagesEl = document.getElementById("chat-messages");
     const msgEls = messagesEl.querySelectorAll(".message");
     if (msgEls.length === 0 || chatTreeNodes.length === 0) return;
@@ -982,6 +1182,127 @@ function chatSyncTreeWithScroll() {
     if (closestIdx >= 0) chatHighlightTreeNode(closestIdx);
 }
 
+// Arrow key navigation for the briefing tree panel.
+// Up/Down walk on-path nodes and scroll the message into view.
+// Left/Right jump between nodes at the same tree depth (same layer),
+// sorted by x position. If the target is off-path, triggers a branch switch.
+function chatNavigateTreeArrowKey(direction) {
+    if (chatTreeNodes.length === 0) return;
+
+    const onPathNodes = chatTreeNodes.filter(tn => tn.onPath);
+    if (onPathNodes.length === 0) return;
+
+    // Suppress scroll↔tree sync so the smooth scroll doesn't fight our highlight
+    chatArrowNavActive = true;
+    clearTimeout(chatArrowNavTimer);
+    chatArrowNavTimer = setTimeout(() => { chatArrowNavActive = false; }, 600);
+
+    if (direction === "up" || direction === "down") {
+        let curOnPathIdx = -1;
+        if (chatCurrentHighlight !== null) {
+            const highlighted = chatTreeNodes[chatCurrentHighlight];
+            if (highlighted && highlighted.onPath) {
+                curOnPathIdx = onPathNodes.indexOf(highlighted);
+            }
+        }
+        if (curOnPathIdx < 0) curOnPathIdx = onPathNodes.length - 1;
+
+        let nextIdx;
+        if (direction === "up") {
+            nextIdx = curOnPathIdx > 0 ? curOnPathIdx - 1 : 0;
+        } else {
+            nextIdx = curOnPathIdx < onPathNodes.length - 1 ? curOnPathIdx + 1 : onPathNodes.length - 1;
+        }
+
+        const target = onPathNodes[nextIdx];
+        chatHighlightTreeNode(chatTreeNodes.indexOf(target));
+
+        const msgEl = document.getElementById("chat-messages").querySelector(`.message[data-msg-id="${target.id}"]`);
+        if (msgEl) msgEl.scrollIntoView({ behavior: "smooth", block: "center" });
+
+    } else if (direction === "left" || direction === "right") {
+        let current = null;
+        if (chatCurrentHighlight !== null && chatTreeNodes[chatCurrentHighlight]) {
+            current = chatTreeNodes[chatCurrentHighlight];
+        }
+        if (!current && onPathNodes.length > 0) {
+            current = onPathNodes[onPathNodes.length - 1];
+        }
+        if (!current) return;
+
+        const sameLayer = chatTreeNodes
+            .filter(tn => tn.depth === current.depth)
+            .sort((a, b) => a.x - b.x);
+        if (sameLayer.length <= 1) return;
+
+        const curIdx = sameLayer.indexOf(current);
+        let nextIdx;
+        if (direction === "right") {
+            nextIdx = (curIdx + 1) % sameLayer.length;
+        } else {
+            nextIdx = (curIdx - 1 + sameLayer.length) % sameLayer.length;
+        }
+        if (nextIdx === curIdx) return;
+
+        const target = sameLayer[nextIdx];
+        chatHighlightTreeNode(chatTreeNodes.indexOf(target));
+
+        if (!target.onPath) {
+            chatNavigateToNode(target.id);
+        } else {
+            const msgEl = document.getElementById("chat-messages").querySelector(`.message[data-msg-id="${target.id}"]`);
+            if (msgEl) msgEl.scrollIntoView({ behavior: "smooth", block: "center" });
+        }
+    }
+}
+
+// ------------------------------------------------------------------
+// Chat panel — image preview management
+// ------------------------------------------------------------------
+
+function renderBriefingImagePreviews() {
+    const inputEl = document.getElementById("chat-input");
+    let area = document.getElementById("briefing-image-preview-area");
+    if (!area) {
+        area = document.createElement("div");
+        area.id = "briefing-image-preview-area";
+        area.className = "image-preview-area";
+        const wrapper = inputEl.closest(".chat-input-wrapper");
+        wrapper.insertBefore(area, inputEl);
+    }
+    area.innerHTML = "";
+    if (chatPendingImages.length === 0) {
+        area.style.display = "none";
+        return;
+    }
+    area.style.display = "flex";
+    chatPendingImages.forEach((img, i) => {
+        const preview = document.createElement("div");
+        preview.className = "image-preview";
+        const imgEl = document.createElement("img");
+        imgEl.src = `data:${img.source.media_type};base64,${img.source.data}`;
+        preview.appendChild(imgEl);
+        const removeBtn = document.createElement("button");
+        removeBtn.className = "remove-btn";
+        removeBtn.textContent = "\u00d7";
+        removeBtn.onclick = () => {
+            chatPendingImages.splice(i, 1);
+            renderBriefingImagePreviews();
+        };
+        preview.appendChild(removeBtn);
+        area.appendChild(preview);
+    });
+}
+
+function clearBriefingImagePreviews() {
+    chatPendingImages = [];
+    const area = document.getElementById("briefing-image-preview-area");
+    if (area) {
+        area.innerHTML = "";
+        area.style.display = "none";
+    }
+}
+
 // ------------------------------------------------------------------
 // Chat panel — utilities
 // ------------------------------------------------------------------
@@ -991,10 +1312,67 @@ function chatScrollToBottom() {
     el.scrollTop = el.scrollHeight;
 }
 
+function chatIsNearBottom(threshold = 150) {
+    const el = document.getElementById("chat-messages");
+    return el.scrollHeight - el.scrollTop - el.clientHeight < threshold;
+}
+
+function chatMaybeScrollToBottom() {
+    if (chatIsNearBottom()) chatScrollToBottom();
+}
+
 function chatAutoResizeInput() {
     const el = document.getElementById("chat-input");
     el.style.height = "auto";
     el.style.height = Math.min(el.scrollHeight, 150) + "px";
+}
+
+// ------------------------------------------------------------------
+// Chat panel — markdown rendering
+// ------------------------------------------------------------------
+
+function chatRenderMarkdown(text) {
+    if (!text) return "";
+    // Close any open code fences so partial streaming doesn't break layout
+    let processed = text;
+    const fenceCount = (processed.match(/^```/gm) || []).length;
+    if (fenceCount % 2 !== 0) {
+        processed += "\n```";
+    }
+    return DOMPurify.sanitize(marked.parse(processed));
+}
+
+function chatAppendStreamingCursor(el) {
+    const existing = el.querySelector(".streaming-cursor-char");
+    if (existing) existing.remove();
+
+    const cursor = document.createElement("span");
+    cursor.className = "streaming-cursor-char";
+    cursor.textContent = "\u25AE";
+
+    // Descend to the deepest last inline-containing element
+    let target = el;
+    while (target.lastElementChild) {
+        const last = target.lastElementChild;
+        if (["PRE", "HR", "BR", "IMG", "TABLE", "UL", "OL"].includes(last.tagName)) break;
+        target = last;
+    }
+    target.appendChild(cursor);
+}
+
+function chatRemoveStreamingCursor(el) {
+    const cursor = el.querySelector(".streaming-cursor-char");
+    if (cursor) cursor.remove();
+}
+
+function chatScheduleMarkdownRender() {
+    if (chatMarkdownRenderTimer) clearTimeout(chatMarkdownRenderTimer);
+    chatMarkdownRenderTimer = setTimeout(() => {
+        if (chatStreamingTextEl && chatStreamingRawText) {
+            chatStreamingTextEl.innerHTML = chatRenderMarkdown(chatStreamingRawText);
+            chatAppendStreamingCursor(chatStreamingTextEl);
+        }
+    }, CHAT_MARKDOWN_DEBOUNCE_MS);
 }
 
 // ------------------------------------------------------------------
@@ -1015,8 +1393,46 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     });
     chatInput.addEventListener("input", chatAutoResizeInput);
+    chatInput.addEventListener("paste", (e) => {
+        const items = e.clipboardData?.items;
+        if (!items) return;
+        for (const item of items) {
+            if (item.type.startsWith("image/")) {
+                e.preventDefault();
+                const file = item.getAsFile();
+                const reader = new FileReader();
+                reader.onload = () => {
+                    const base64 = reader.result.split(",")[1];
+                    const mediaType = item.type;
+                    chatPendingImages.push({ type: "image", source: { type: "base64", media_type: mediaType, data: base64 } });
+                    renderBriefingImagePreviews();
+                };
+                reader.readAsDataURL(file);
+                break;
+            }
+        }
+    });
 
     document.getElementById("chat-messages").addEventListener("scroll", chatSyncTreeWithScroll);
+
+    // Arrow key navigation for tree panel
+    document.addEventListener("keydown", (e) => {
+        if (!["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.key)) return;
+        // Only when chat panel is visible
+        const chatPanel = document.getElementById("chat-panel");
+        if (!chatPanel || chatPanel.style.display === "none") return;
+        // Not when typing in an input
+        const active = document.activeElement;
+        if (active && (active.tagName === "INPUT" || active.tagName === "TEXTAREA" || active.tagName === "SELECT")) return;
+        // Not while streaming
+        if (chatIsStreaming) return;
+
+        e.preventDefault();
+        const dirMap = { ArrowUp: "up", ArrowDown: "down", ArrowLeft: "left", ArrowRight: "right" };
+        chatNavigateTreeArrowKey(dirMap[e.key]);
+    });
+
+    marked.setOptions({ breaks: true, gfm: true });
 
     loadBriefing(currentDate);
     loadProgress();

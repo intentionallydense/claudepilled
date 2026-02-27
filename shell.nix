@@ -14,6 +14,8 @@ pkgs.mkShell {
       pydantic
       websockets
       feedparser
+      python-multipart
+      pymupdf
       setuptools
       wheel
     ]))

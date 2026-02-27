@@ -16,6 +16,7 @@ from claude_wrapper.briefing_feeds import (
     check_acx_new_posts,
     fetch_chemistry_news,
     fetch_ft_headlines,
+    fetch_physics_news,
     fetch_wikipedia_featured,
 )
 from claude_wrapper.briefing_sequential import get_long_read, get_todays_item
@@ -38,6 +39,10 @@ or why it matters. If the feed is empty, say so briefly.
 
 ## Chemistry
 Pick the most interesting 2-3 items from the chemistry news. One sentence each,
+plus why it matters. Skip if empty.
+
+## Physics
+Pick the most interesting 2-3 items from the physics news. One sentence each,
 plus why it matters. Skip if empty.
 
 ## Today's Read
@@ -124,8 +129,11 @@ def _gather_sections(briefing_db: BriefingDatabase, task_db: TaskDatabase) -> di
     # FT headlines
     sections["ft_headlines"] = fetch_ft_headlines(max_items=10)
 
-    # Chemistry news
-    sections["chemistry_news"] = fetch_chemistry_news(max_items=5)
+    # Chemistry news (Nature Chemistry deduped via shown_posts)
+    sections["chemistry_news"] = fetch_chemistry_news(briefing_db, max_items=5)
+
+    # Physics news (Nature Physics deduped via shown_posts)
+    sections["physics_news"] = fetch_physics_news(briefing_db, max_items=5)
 
     # ACX RSS check (before long read, so we can pass new post)
     acx_new = check_acx_new_posts(briefing_db)

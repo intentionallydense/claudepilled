@@ -6,7 +6,7 @@
     <title>Claude Wrapper</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/style.css?v=7">
+    <link rel="stylesheet" href="/style.css?v=10">
 </head>
 <body>
     <div id="app">
@@ -18,6 +18,7 @@
                     <a href="/briefing" class="text-btn">briefing</a>
                     <a href="/tasks" class="text-btn">tasks</a>
                     <a href="/couch" class="text-btn">couch</a>
+                    <a href="#" id="files-nav-btn" class="text-btn">files</a>
                     <a href="/settings" class="text-btn">settings</a>
                 </nav>
             </div>
@@ -58,10 +59,19 @@
             <!-- Input area -->
             <div id="input-area" class="input-area" style="display:none;">
                 <div class="input-wrapper">
+                    <div id="context-bar" class="context-bar" style="display:none;">
+                        <div class="context-bar-header">
+                            <span class="context-bar-label">context</span>
+                            <span id="context-token-count" class="context-token-count"></span>
+                        </div>
+                        <div id="context-bar-files" class="context-bar-files"></div>
+                    </div>
                     <textarea id="message-input" placeholder="message..." rows="1"></textarea>
+                    <div id="tag-autocomplete" class="tag-autocomplete"></div>
                     <div class="input-actions">
                         <span id="input-status" class="input-status"></span>
                         <button id="send-btn" class="send-btn">send</button>
+                        <button id="stop-btn" class="stop-btn" style="display:none;">stop</button>
                     </div>
                 </div>
             </div>
@@ -77,6 +87,35 @@
         </aside>
 
     </div>
-    <script src="/app.js?v=7"></script>
+
+    <!-- File management modal -->
+    <div id="file-modal" class="modal" style="display:none;">
+        <div class="modal-content" style="width:600px;">
+            <div class="modal-header">
+                <span class="modal-title">files</span>
+                <button class="modal-close" id="file-modal-close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="file-upload-area" id="file-upload-area">
+                    <input type="file" id="file-upload-input" accept=".pdf,.md" multiple style="display:none;">
+                    <div class="file-upload-label">drop .pdf or .md files here, or <a href="#" id="file-upload-link">browse</a></div>
+                    <div class="file-upload-tags">
+                        <input type="text" id="file-upload-tags-input" placeholder="tags (comma-separated)" class="file-tags-input">
+                    </div>
+                </div>
+                <div class="file-filter-row">
+                    <span class="form-label" style="margin-bottom:0;">filter by tag:</span>
+                    <select id="file-filter-tag" class="select-minimal">
+                        <option value="">all</option>
+                    </select>
+                </div>
+                <div id="file-list" class="file-list"></div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dompurify/dist/purify.min.js"></script>
+    <script src="/app.js?v=13"></script>
 </body>
 </html>

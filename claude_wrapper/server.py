@@ -28,6 +28,9 @@ from claude_wrapper.briefing_routes import (
     router as briefing_router,
 )
 from claude_wrapper.briefing_sequential import init_all_series
+from claude_wrapper.file_db import FileDatabase
+from claude_wrapper.file_routes import router as file_router
+from claude_wrapper.file_routes import init as init_file_routes
 from claude_wrapper.task_db import TaskDatabase
 from claude_wrapper.task_routes import router as task_router
 from claude_wrapper.task_routes import init as init_task_routes
@@ -37,6 +40,7 @@ from claude_wrapper.tools import ToolRegistry
 load_dotenv()
 
 app = FastAPI(title="Claude Wrapper")
+app.include_router(file_router)
 app.include_router(task_router)
 app.include_router(briefing_router)
 app.include_router(briefing_progress_router)
@@ -47,6 +51,7 @@ app.include_router(briefing_anki_router)
 # ---------------------------------------------------------------------------
 manager: ConversationManager | None = None
 couch: CouchOrchestrator | None = None
+file_db_instance: FileDatabase | None = None
 _static_dir = Path(__file__).resolve().parent.parent / "static"
 
 
@@ -68,7 +73,7 @@ def _load_example_tools() -> ToolRegistry:
 
 @app.on_event("startup")
 async def startup():
-    global manager, couch
+    global manager, couch, file_db_instance
     api_key = os.environ.get("ANTHROPIC_API_KEY", "")
     if not api_key:
         print("WARNING: ANTHROPIC_API_KEY not set. Set it in .env or environment.")
@@ -78,9 +83,11 @@ async def startup():
     task_db = TaskDatabase(db)
     register_task_tools(registry, task_db)
     init_task_routes(task_db)
+    file_db_instance = FileDatabase(db)
+    init_file_routes(file_db_instance)
     briefing_db = BriefingDatabase(db)
     init_all_series(briefing_db)
-    manager = ConversationManager(client=client, tool_registry=registry, db=db)
+    manager = ConversationManager(client=client, tool_registry=registry, db=db, file_db=file_db_instance)
     init_briefing_routes(briefing_db, task_db, client, manager)
     couch = CouchOrchestrator(client=client, db=db)
 
@@ -222,27 +229,69 @@ async def websocket_chat(ws: WebSocket, conversation_id: str):
         while True:
             data = await ws.receive_text()
             payload = json.loads(data)
-            user_text = payload.get("message", "")
+            # message can be a string or a list of content blocks (for images)
+            user_message = payload.get("message", "")
+            # For display/tag extraction, get just the text portion
+            if isinstance(user_message, list):
+                user_text = "".join(
+                    b.get("text", "") for b in user_message if b.get("type") == "text"
+                )
+            else:
+                user_text = user_message
             thinking_budget = payload.get("thinking_budget", None)
             action = payload.get("action", "chat")
+            inject_tags = payload.get("inject_tags", [])
+
+            # Handle tag injection before processing the message
+            if inject_tags and file_db_instance:
+                matched_files = file_db_instance.get_files_by_tags(inject_tags)
+                if matched_files:
+                    new_ids = [f["id"] for f in matched_files]
+                    file_db_instance.add_active_file_ids(conversation_id, new_ids)
+                    # Emit context_update event
+                    active_ids = file_db_instance.get_active_file_ids(conversation_id)
+                    context_files = []
+                    total_tokens = 0
+                    for fid in active_ids:
+                        f = file_db_instance.get_file(fid)
+                        if f:
+                            context_files.append({
+                                "id": f["id"],
+                                "filename": f["filename"],
+                                "tags": f["tags"],
+                                "token_count": f["token_count"],
+                            })
+                            total_tokens += f["token_count"]
+                    await ws.send_text(json.dumps({
+                        "type": StreamEventType.CONTEXT_UPDATE.value,
+                        "files": context_files,
+                        "total_tokens": total_tokens,
+                    }))
+
+            # Tag-only messages (no text content, just tags): activate context and skip chat
+            if not user_text and inject_tags:
+                await ws.send_text(json.dumps({
+                    "type": StreamEventType.MESSAGE_DONE.value,
+                }))
+                continue
 
             if action == "edit":
-                parent_id = payload.get("parent_id", "")
-                if not user_text or not parent_id:
+                parent_id = payload.get("parent_id") or None
+                if not user_text and not isinstance(user_message, list):
                     continue
                 async for event in manager.edit_message(
                     conversation_id,
                     parent_id=parent_id,
-                    new_text=user_text,
+                    new_content=user_message,
                     thinking_budget=thinking_budget,
                 ):
                     await ws.send_text(json.dumps(event.to_ws_json()))
             else:
-                if not user_text:
+                if not user_text and not isinstance(user_message, list):
                     continue
                 async for event in manager.stream_chat(
                     conversation_id,
-                    user_text,
+                    user_message,
                     thinking_budget=thinking_budget,
                 ):
                     await ws.send_text(json.dumps(event.to_ws_json()))
@@ -437,10 +486,19 @@ async def websocket_couch(ws: WebSocket, session_id: str):
         while True:
             data = await ws.receive_text()
             payload = json.loads(data)
+            # content can be a string or a list of content blocks (for images)
             content = payload.get("content", "")
             input_type = payload.get("type", "share")
 
-            if not content:
+            # For emptiness check, look at text portion
+            if isinstance(content, list):
+                has_content = any(
+                    b.get("text") or b.get("type") == "image" for b in content
+                )
+            else:
+                has_content = bool(content)
+
+            if not has_content:
                 continue
 
             async for event in couch.stream_turns(session_id, content, input_type):
@@ -456,6 +514,42 @@ async def websocket_couch(ws: WebSocket, session_id: str):
             }))
         except Exception:
             pass
+
+
+# ---------------------------------------------------------------------------
+# Context endpoints (injected files per conversation)
+# ---------------------------------------------------------------------------
+
+@app.get("/api/conversations/{conversation_id}/context")
+async def get_conversation_context(conversation_id: str):
+    active_ids = file_db_instance.get_active_file_ids(conversation_id)
+    files = []
+    total_tokens = 0
+    for fid in active_ids:
+        f = file_db_instance.get_file(fid)
+        if f:
+            files.append({
+                "id": f["id"],
+                "filename": f["filename"],
+                "tags": f["tags"],
+                "token_count": f["token_count"],
+            })
+            total_tokens += f["token_count"]
+    return {"files": files, "total_tokens": total_tokens}
+
+
+@app.delete("/api/conversations/{conversation_id}/context/{file_id}")
+async def remove_context_file(conversation_id: str, file_id: str):
+    updated = file_db_instance.remove_active_file_ids(conversation_id, [file_id])
+    return {"active_file_ids": updated}
+
+
+@app.delete("/api/conversations/{conversation_id}/context/tag/{tag}")
+async def remove_context_tag(conversation_id: str, tag: str):
+    matching = file_db_instance.get_files_by_tags([tag])
+    ids_to_remove = [f["id"] for f in matching]
+    updated = file_db_instance.remove_active_file_ids(conversation_id, ids_to_remove)
+    return {"active_file_ids": updated}
 
 
 # ---------------------------------------------------------------------------

@@ -30,6 +30,7 @@ _OPENER = urllib.request.build_opener(_HTTPS_HANDLER)
 FT_RSS = "https://www.ft.com/rss/home"
 CEN_RSS = "https://cen.acs.org/rss/feed.html"
 NATURE_CHEM_RSS = "https://www.nature.com/nchem.rss"
+NATURE_PHYS_RSS = "https://www.nature.com/nphys.rss"
 ACX_RSS = "https://www.astralcodexten.com/feed"
 
 # Wikipedia REST API for featured article
@@ -70,10 +71,17 @@ def fetch_ft_headlines(max_items: int = 10) -> list[dict]:
     return _parse_feed(FT_RSS, max_items)
 
 
-def fetch_chemistry_news(max_items: int = 5) -> list[dict]:
-    """Fetch chemistry news from C&EN and Nature Chemistry, merged by recency."""
+def fetch_chemistry_news(
+    briefing_db: BriefingDatabase | None = None, max_items: int = 5
+) -> list[dict]:
+    """Fetch chemistry news from C&EN and Nature Chemistry, merged by recency.
+
+    Nature Chemistry articles are deduped via shown_posts — their RSS turnover
+    is slower than daily, so without dedup the same articles repeat across days.
+    C&EN updates frequently enough that dedup isn't needed.
+    """
     cen = _parse_feed(CEN_RSS, max_items)
-    nature = _parse_feed(NATURE_CHEM_RSS, max_items)
+    nature = _parse_feed(NATURE_CHEM_RSS, max_items * 2)  # fetch extra to compensate for filtering
 
     # Tag the source
     for item in cen:
@@ -81,11 +89,45 @@ def fetch_chemistry_news(max_items: int = 5) -> list[dict]:
     for item in nature:
         item["source"] = "Nature Chemistry"
 
+    # Dedup Nature Chemistry articles — skip already-shown, mark new ones
+    if briefing_db is not None:
+        unseen = []
+        for item in nature:
+            url = item.get("url", "")
+            if url and not briefing_db.was_shown(url):
+                briefing_db.mark_shown(url, "nature_chem")
+                unseen.append(item)
+        nature = unseen
+
     # Merge and take most recent
     merged = cen + nature
-    # feedparser dates are strings — sort alphabetically works for RSS date formats
     merged.sort(key=lambda x: x.get("published", ""), reverse=True)
     return merged[:max_items]
+
+
+def fetch_physics_news(
+    briefing_db: BriefingDatabase | None = None, max_items: int = 5
+) -> list[dict]:
+    """Fetch physics news from Nature Physics, deduped via shown_posts.
+
+    Same slow-turnover issue as Nature Chemistry — dedup prevents repeats.
+    """
+    articles = _parse_feed(NATURE_PHYS_RSS, max_items * 2)
+
+    for item in articles:
+        item["source"] = "Nature Physics"
+
+    if briefing_db is not None:
+        unseen = []
+        for item in articles:
+            url = item.get("url", "")
+            if url and not briefing_db.was_shown(url):
+                briefing_db.mark_shown(url, "nature_phys")
+                unseen.append(item)
+        articles = unseen
+
+    articles.sort(key=lambda x: x.get("published", ""), reverse=True)
+    return articles[:max_items]
 
 
 def fetch_wikipedia_featured(target_date: date | None = None) -> dict | None:

@@ -12,6 +12,7 @@ from claude_wrapper.client import ClaudeClient
 from claude_wrapper.db import Database
 from claude_wrapper.models import (
     AVAILABLE_MODELS,
+    ContentBlock,
     Conversation,
     Message,
     StreamEvent,
@@ -136,18 +137,36 @@ class CouchOrchestrator:
     async def stream_turns(
         self,
         session_id: str,
-        curator_input: str,
+        curator_input: str | list[dict],
         input_type: str = "share",
     ) -> AsyncGenerator[StreamEvent, None]:
         """Run the couch turn loop, yielding events for the WebSocket."""
 
-        # Format the curator input
-        if input_type == "nudge":
-            formatted = f'[nudge: "{curator_input}"]'
-        elif input_type == "jumpin":
-            formatted = f"[human]: {curator_input}"
+        # Format the curator input — may contain image blocks
+        if isinstance(curator_input, list):
+            # Extract text portion for the label prefix
+            text_parts = [b.get("text", "") for b in curator_input if b.get("type") == "text"]
+            text_str = "".join(text_parts)
+            image_blocks = [b for b in curator_input if b.get("type") == "image"]
         else:
-            formatted = f"[shared: {curator_input}]"
+            text_str = curator_input
+            image_blocks = []
+
+        if input_type == "nudge":
+            label_text = f'[nudge: "{text_str}"]'
+        elif input_type == "jumpin":
+            label_text = f"[human]: {text_str}"
+        else:
+            label_text = f"[shared: {text_str}]"
+
+        # Build final content — string if no images, ContentBlock list if images present
+        if image_blocks:
+            content_blocks = [ContentBlock(type="text", text=label_text)]
+            for img in image_blocks:
+                content_blocks.append(ContentBlock(**img))
+            formatted = content_blocks
+        else:
+            formatted = label_text
 
         # Load conversation and model config
         conv = self.db.load_conversation(session_id)
@@ -323,35 +342,93 @@ class CouchOrchestrator:
         - Target model's messages → role: "assistant"
         - Other model's messages → role: "user" with label prefix
         - Curator messages → role: "user"
+
+        When a message has image blocks (content is a list), builds a
+        content-block list with label prefix on the text portion.
         """
         raw = []
         for msg in messages:
-            text = msg.text() if hasattr(msg, "text") and callable(msg.text) else str(msg.content)
             speaker = msg.speaker
+            has_images = self._has_image_blocks(msg)
 
             if speaker == target_model:
+                # Own messages — assistant role, just text
+                text = msg.text()
                 raw.append({"role": "assistant", "content": text})
             elif speaker == "model_a":
-                raw.append({"role": "user", "content": f"[{model_a_label}]: {text}"})
+                content = self._build_labeled_content(msg, f"[{model_a_label}]")
+                raw.append({"role": "user", "content": content})
             elif speaker == "model_b":
-                raw.append({"role": "user", "content": f"[{model_b_label}]: {text}"})
+                content = self._build_labeled_content(msg, f"[{model_b_label}]")
+                raw.append({"role": "user", "content": content})
             elif speaker == "system":
-                raw.append({"role": "user", "content": text})
+                raw.append({"role": "user", "content": msg.text()})
             else:
-                # curator or unknown
-                raw.append({"role": "user", "content": text})
+                # curator or unknown — may have images
+                if has_images:
+                    content = self._content_as_api_blocks(msg)
+                    raw.append({"role": "user", "content": content})
+                else:
+                    raw.append({"role": "user", "content": msg.text()})
 
         return self._merge_consecutive_roles(raw)
 
     @staticmethod
+    def _has_image_blocks(msg: Message) -> bool:
+        """Check if a message contains image content blocks."""
+        if isinstance(msg.content, str):
+            return False
+        return any(b.type == "image" for b in msg.content)
+
+    @staticmethod
+    def _content_as_api_blocks(msg: Message) -> list[dict]:
+        """Convert message content to API-format block list."""
+        if isinstance(msg.content, str):
+            return [{"type": "text", "text": msg.content}]
+        return [b.model_dump(exclude_none=True) for b in msg.content]
+
+    @staticmethod
+    def _build_labeled_content(msg: Message, label: str) -> str | list[dict]:
+        """Build content with a label prefix. Returns a string for text-only
+        messages, or a block list when images are present."""
+        text = msg.text()
+        if isinstance(msg.content, str) or not any(b.type == "image" for b in msg.content):
+            return f"{label}: {text}"
+        # Has images — build block list with label on text
+        blocks = [{"type": "text", "text": f"{label}: {text}"}]
+        for b in msg.content:
+            if b.type == "image":
+                blocks.append(b.model_dump(exclude_none=True))
+        return blocks
+
+    @staticmethod
     def _merge_consecutive_roles(messages: list[dict]) -> list[dict]:
-        """Merge consecutive same-role messages to ensure strict alternation."""
+        """Merge consecutive same-role messages to ensure strict alternation.
+
+        Handles both string content and list-of-blocks content. When merging
+        a string with a list (or two lists), normalizes everything to a list.
+        """
         if not messages:
             return []
+
+        def _to_blocks(content):
+            if isinstance(content, str):
+                return [{"type": "text", "text": content}]
+            return list(content)
+
+        def _merge_content(a, b):
+            """Merge two content values, keeping string form when possible."""
+            if isinstance(a, str) and isinstance(b, str):
+                return a + "\n\n" + b
+            # At least one is a block list — normalize both
+            blocks_a = _to_blocks(a)
+            blocks_b = _to_blocks(b)
+            return blocks_a + [{"type": "text", "text": "\n\n"}] + blocks_b
+
         merged = [messages[0].copy()]
         for msg in messages[1:]:
             if msg["role"] == merged[-1]["role"]:
-                merged[-1]["content"] += "\n\n" + msg["content"]
+                merged[-1]["content"] = _merge_content(merged[-1]["content"], msg["content"])
             else:
                 merged.append(msg.copy())
         return merged

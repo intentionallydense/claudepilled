@@ -58,6 +58,14 @@ class Database:
                 content TEXT NOT NULL DEFAULT '',
                 created_at TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS files (
+                id TEXT PRIMARY KEY,
+                filename TEXT NOT NULL,
+                tags TEXT NOT NULL DEFAULT '[]',
+                content TEXT NOT NULL,
+                token_count INTEGER NOT NULL DEFAULT 0,
+                uploaded_at TEXT NOT NULL
+            );
         """)
         conn.commit()
 
@@ -70,6 +78,7 @@ class Database:
             ("type", "TEXT", "'chat'"),
             ("metadata", "TEXT", "NULL"),
             ("prompt_id", "TEXT", "NULL"),
+            ("active_file_ids", "TEXT", "'[]'"),
         ]
         for col, col_type, default in conv_migrations:
             try:
@@ -393,6 +402,11 @@ class Database:
             elif isinstance(raw, list):
                 text_parts = [b.get("text", "") for b in raw if b.get("type") == "text" and b.get("text")]
                 preview = "".join(text_parts)[:80]
+                # If no text but has image blocks, show a placeholder so the
+                # tree doesn't confuse this with a tool_result (which also
+                # has an empty preview).
+                if not preview and any(b.get("type") == "image" for b in raw):
+                    preview = "[image]"
             else:
                 preview = str(raw)[:80]
             nodes.append({

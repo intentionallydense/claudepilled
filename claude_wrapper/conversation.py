@@ -27,10 +27,12 @@ class ConversationManager:
         client: ClaudeClient,
         tool_registry: ToolRegistry | None = None,
         db: Database | None = None,
+        file_db: "FileDatabase | None" = None,
     ):
         self.client = client
         self.tools = tool_registry or ToolRegistry()
         self.db = db or Database()
+        self.file_db = file_db
 
     # ------------------------------------------------------------------
     # Conversation CRUD
@@ -120,7 +122,7 @@ class ConversationManager:
     async def stream_chat(
         self,
         conversation_id: str,
-        user_text: str,
+        user_content: str | list[dict],
         thinking_budget: int | None = None,
     ) -> AsyncGenerator[StreamEvent, None]:
         """Stream a chat response, handling tool use loops."""
@@ -132,8 +134,11 @@ class ConversationManager:
         # Track whether this is the first user message (for auto-title)
         is_first_message = len(conv.messages) == 0
 
+        # Build message content — string stays as-is, list becomes ContentBlocks
+        msg_content = self._normalize_user_content(user_content)
+
         # Append user message with parent = current leaf
-        user_msg = Message(role="user", content=user_text, parent_id=conv.current_leaf_id)
+        user_msg = Message(role="user", content=msg_content, parent_id=conv.current_leaf_id)
         conv.messages.append(user_msg)
         self.db.save_message(conversation_id, user_msg)
 
@@ -247,7 +252,8 @@ class ConversationManager:
 
         # Auto-generate title after first exchange
         if is_first_message:
-            title = await self._generate_title(user_text)
+            title_text = user_msg.text() if isinstance(msg_content, list) else str(user_content)
+            title = await self._generate_title(title_text)
             self.db.update_conversation_title(conversation_id, title)
             yield StreamEvent(type=StreamEventType.TITLE_UPDATE, text=title)
 
@@ -267,8 +273,8 @@ class ConversationManager:
     async def edit_message(
         self,
         conversation_id: str,
-        parent_id: str,
-        new_text: str,
+        parent_id: str | None,
+        new_content: str | list[dict],
         thinking_budget: int | None = None,
     ) -> AsyncGenerator[StreamEvent, None]:
         """Create a new branch by editing a user message.
@@ -282,8 +288,11 @@ class ConversationManager:
             yield StreamEvent(type=StreamEventType.ERROR, error="Conversation not found")
             return
 
+        # Build message content — string stays as-is, list becomes ContentBlocks
+        msg_content = self._normalize_user_content(new_content)
+
         # Create new user message branching from parent_id
-        user_msg = Message(role="user", content=new_text, parent_id=parent_id)
+        user_msg = Message(role="user", content=msg_content, parent_id=parent_id)
         self.db.save_message(conversation_id, user_msg)
 
         # Reload conversation from the new leaf
@@ -429,11 +438,50 @@ class ConversationManager:
                 parts.append(prompt["content"])
         if conv.system_prompt:
             parts.append(conv.system_prompt)
+        # Append injected files if any are active for this conversation
+        files_block = self._build_injected_files_block(conv.id)
+        if files_block:
+            parts.append(files_block)
         return "\n\n".join(parts)
+
+    def _build_injected_files_block(self, conversation_id: str) -> str:
+        """Build XML block of injected files for the system prompt."""
+        if not self.file_db:
+            return ""
+        active_ids = self.file_db.get_active_file_ids(conversation_id)
+        if not active_ids:
+            return ""
+        files = []
+        for fid in active_ids:
+            f = self.file_db.get_file(fid)
+            if f:
+                files.append(f)
+        if not files:
+            return ""
+        files.sort(key=lambda f: f["filename"])
+        parts = ["<injected_files>"]
+        for f in files:
+            tags_str = ", ".join(f["tags"]) if isinstance(f["tags"], list) else f["tags"]
+            parts.append(f'<file name="{f["filename"]}" tags="{tags_str}" tokens="{f["token_count"]}">')
+            parts.append(f["content"])
+            parts.append("</file>")
+        parts.append("</injected_files>")
+        return "\n".join(parts)
 
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _normalize_user_content(content: str | list[dict]) -> str | list[ContentBlock]:
+        """Convert user input to the appropriate content format.
+
+        Strings pass through as-is. Lists of dicts become ContentBlock lists,
+        which is how the API expects multi-block messages (text + images).
+        """
+        if isinstance(content, str):
+            return content
+        return [ContentBlock(**block) for block in content]
 
     def _execute_tool_blocks(self, tool_blocks: list[ContentBlock]) -> list[ContentBlock]:
         results: list[ContentBlock] = []

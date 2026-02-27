@@ -69,9 +69,9 @@ class ToolDefinition(BaseModel):
 # ---------------------------------------------------------------------------
 
 class ContentBlock(BaseModel):
-    """A single block within a message (text, tool_use, tool_result, or thinking)."""
+    """A single block within a message (text, tool_use, tool_result, thinking, or image)."""
 
-    type: str  # "text", "tool_use", "tool_result", "thinking"
+    type: str  # "text", "tool_use", "tool_result", "thinking", "image"
     text: str | None = None
     # tool_use fields
     id: str | None = None
@@ -83,6 +83,8 @@ class ContentBlock(BaseModel):
     # thinking fields
     thinking: str | None = None
     signature: str | None = None
+    # image fields — {"type": "base64", "media_type": "image/png", "data": "..."}
+    source: dict[str, Any] | None = None
 
 
 class Message(BaseModel):
@@ -160,6 +162,7 @@ class StreamEventType(str, Enum):
     COUCH_TURN_END = "couch_turn_end"
     COUCH_PAUSED = "couch_paused"
     COUCH_STATUS = "couch_status"
+    CONTEXT_UPDATE = "context_update"
 
 
 class StreamEvent(BaseModel):
