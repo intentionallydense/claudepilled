@@ -559,8 +559,6 @@ body {
     display: flex;
     flex-direction: column;
     overflow: hidden;
-    min-width: 280px;
-    max-width: 500px;
 }
 .board-panel-header {
     padding: 0.6rem 0.75rem 0.4rem;
@@ -684,7 +682,6 @@ body {
     margin-top: 0.5rem;
 }
 .board-input-btn {
-    width: 100%;
     background: #111;
     color: #fff;
     border: none;
