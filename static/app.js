@@ -1223,24 +1223,15 @@ function syncTreeWithScroll() {
     const scrollBottom = messagesEl.scrollHeight - messagesEl.scrollTop - messagesEl.clientHeight;
     if (scrollBottom < 40) {
         const idx = treeNodes.indexOf(onPathNodes[onPathNodes.length - 1]);
-        if (idx >= 0 && treeNodes[idx]) {
-            if (currentHighlight !== null && treeNodes[currentHighlight])
-                treeNodes[currentHighlight].el.classList.remove("scroll-highlight");
-            treeNodes[idx].el.classList.add("scroll-highlight");
-            treeNodes[idx].el.scrollIntoView({ behavior: "smooth", block: "end" });
-            currentHighlight = idx;
-        }
+        if (idx >= 0) highlightTreeNode(idx);
+        // Scroll the tree panel itself to the bottom
+        nodeMap.scrollTo({ top: nodeMap.scrollHeight, behavior: "smooth" });
         return;
     }
     if (messagesEl.scrollTop < 40) {
         const idx = treeNodes.indexOf(onPathNodes[0]);
-        if (idx >= 0 && treeNodes[idx]) {
-            if (currentHighlight !== null && treeNodes[currentHighlight])
-                treeNodes[currentHighlight].el.classList.remove("scroll-highlight");
-            treeNodes[idx].el.classList.add("scroll-highlight");
-            treeNodes[idx].el.scrollIntoView({ behavior: "smooth", block: "start" });
-            currentHighlight = idx;
-        }
+        if (idx >= 0) highlightTreeNode(idx);
+        nodeMap.scrollTo({ top: 0, behavior: "smooth" });
         return;
     }
 
