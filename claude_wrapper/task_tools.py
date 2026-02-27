@@ -17,6 +17,23 @@ from claude_wrapper.task_urgency import sort_by_urgency
 from claude_wrapper.tools import ToolRegistry
 
 
+def _parse_tags(raw: str) -> list[str]:
+    """Parse tags from comma-separated string or JSON array string.
+
+    Claude sometimes passes tags as '["tag1", "tag2"]' instead of 'tag1, tag2'.
+    This handles both formats so the stored value is always a clean list.
+    """
+    raw = raw.strip()
+    if raw.startswith("["):
+        try:
+            parsed = json.loads(raw)
+            if isinstance(parsed, list):
+                return [str(t).strip() for t in parsed if str(t).strip()]
+        except json.JSONDecodeError:
+            pass
+    return [t.strip() for t in raw.split(",") if t.strip()]
+
+
 BRAIN_DUMP_PROMPT = """\
 The user wants to capture a task but may only have a vague idea. Your job is \
 to interview them until you have enough detail to create a well-formed task \
@@ -92,7 +109,7 @@ def register_task_tools(registry: ToolRegistry, task_db: TaskDatabase) -> None:
         if project:
             kwargs["project"] = project
         if tags:
-            kwargs["tags"] = [t.strip() for t in tags.split(",") if t.strip()]
+            kwargs["tags"] = _parse_tags(tags)
         if due:
             kwargs["due"] = due
         if depends:
@@ -125,7 +142,7 @@ def register_task_tools(registry: ToolRegistry, task_db: TaskDatabase) -> None:
         if project:
             updates["project"] = project
         if tags:
-            updates["tags"] = [t.strip() for t in tags.split(",") if t.strip()]
+            updates["tags"] = _parse_tags(tags)
         if due:
             updates["due"] = due
         if status and status in ("pending", "active"):
@@ -186,3 +203,44 @@ def register_task_tools(registry: ToolRegistry, task_db: TaskDatabase) -> None:
         sorted_tasks = sort_by_urgency(tasks)
         n = min(int(limit), len(sorted_tasks))
         return json.dumps(sorted_tasks[:n], default=str)
+
+    # ------------------------------------------------------------------
+    # Schema refresher — injects current projects/tags into tool descriptions
+    # so the LLM sees them in the schema without an extra round-trip.
+    # ------------------------------------------------------------------
+
+    def _refresh_task_schemas() -> None:
+        projects = task_db.list_projects()
+        tags = task_db.list_tags()
+
+        proj_desc = "Project name."
+        if projects:
+            proj_desc = f"Existing projects: {', '.join(projects)}. You can also create a new one."
+
+        tags_desc = "Comma-separated tags."
+        if tags:
+            tags_desc = f"Comma-separated tags. Existing tags: {', '.join(tags)}. You can also create new ones."
+
+        for tool_name in ("task_create", "task_update"):
+            tool = registry._tools.get(tool_name)
+            if not tool:
+                continue
+            props = tool.input_schema.get("properties", {})
+            if "project" in props:
+                props["project"]["description"] = proj_desc
+            if "tags" in props:
+                props["tags"]["description"] = tags_desc
+
+        # Also enrich task_list filter description
+        task_list_tool = registry._tools.get("task_list")
+        if task_list_tool:
+            props = task_list_tool.input_schema.get("properties", {})
+            if "filter" in props:
+                filter_parts = ['Filters like "project:X", "tag:Y", "status:active".']
+                if projects:
+                    filter_parts.append(f"Projects: {', '.join(projects)}.")
+                if tags:
+                    filter_parts.append(f"Tags: {', '.join(tags)}.")
+                props["filter"]["description"] = " ".join(filter_parts)
+
+    registry.add_refresher(_refresh_task_schemas)

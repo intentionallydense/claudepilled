@@ -16,7 +16,7 @@ body {
 /* Page layout                                                        */
 /* ------------------------------------------------------------------ */
 #settings-page {
-    max-width: 480px;
+    max-width: 640px;
     margin: 0 auto;
     padding: 3rem 1.5rem;
 }

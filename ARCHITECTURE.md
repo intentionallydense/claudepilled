@@ -11,7 +11,7 @@ Claude Wrapper is a personal web UI and API wrapper around the Anthropic Claude 
 | `__init__.py` | Package exports: `ClaudeClient`, `ToolRegistry`, `ConversationManager`, `CouchOrchestrator` |
 | `client.py` | Core Anthropic API client — sync `send()` and async `stream()`, retry logic, request building |
 | `models.py` | Pydantic data models: `Message`, `Conversation`, `ContentBlock`, `StreamEvent`, `ToolDefinition`, model catalog/pricing |
-| `tools.py` | `ToolRegistry` — decorator-based tool registration, JSON schema generation from type hints, tool execution |
+| `tools.py` | `ToolRegistry` — decorator-based tool registration, JSON schema generation from type hints, tool execution. Supports schema refreshers for dynamic descriptions |
 | `conversation.py` | `ConversationManager` — orchestrates chat turns, tool loops, streaming, message branching, auto-titling |
 | `couch.py` | `CouchOrchestrator` — two-model chatroom with role-flipping, turn pacing, [ready] signaling |
 | `db.py` | SQLite persistence — conversations, messages (tree-structured), settings, prompts library |
@@ -19,7 +19,7 @@ Claude Wrapper is a personal web UI and API wrapper around the Anthropic Claude 
 | `task_db.py` | `TaskDatabase` — CRUD for the `tasks` table, recurrence handling, annotations |
 | `task_urgency.py` | Urgency scoring — computes dynamic scores at render time using priority, due date, age, status |
 | `task_routes.py` | FastAPI `APIRouter` for `/api/tasks/*` endpoints, mounted by server.py |
-| `task_tools.py` | Claude tool definitions for task management (task_create, task_complete, etc.) + brain-dump prompt |
+| `task_tools.py` | Claude tool definitions for task management (task_create, task_complete, etc.) + brain-dump prompt. Registers a schema refresher that injects current projects/tags into tool descriptions |
 | `briefing_db.py` | `BriefingDatabase` — 3 tables: briefings, reading_progress, shown_posts |
 | `briefing_feeds.py` | RSS fetching (FT, C&EN, Nature Chem, Nature Physics, ACX) + Wikipedia featured article API. Nature Chem/Physics deduped via shown_posts |
 | `briefing_sequential.py` | Reading list pointer management — advances one item/day per series |
@@ -70,7 +70,7 @@ Claude Wrapper is a personal web UI and API wrapper around the Anthropic Claude 
 - **Couch role-flipping** — each model sees the other's messages as "user" role with a label prefix. Messages are merged to ensure strict role alternation per API requirements.
 - **Task urgency scores** — computed at query time, not stored. Formula combines priority, due-date proximity, age, active status, blocked/waiting penalties. Coefficients are tunable in `task_urgency.py`.
 - **Three-layer prompt system** — "universal prompt" (global setting, always prepended) + per-conversation "saved prompt" (selected via dropdown, stored as `prompt_id`) + injected files block (from active file context). Composed at call time in `_get_effective_system_prompt()`. Legacy conversations with a baked-in `system_prompt` but no `prompt_id` fall back to that field.
-- **Task tools as Claude functions** — task CRUD is exposed as tool calls so Claude can manage tasks during conversations. The brain-dump flow creates a conversation with the seeded "Brain dump" saved prompt selected, which guides Claude to interview the user and call `task_create`.
+- **Task tools as Claude functions** — task CRUD is exposed as tool calls so Claude can manage tasks during conversations. The brain-dump flow creates a conversation with the seeded "Brain dump" saved prompt selected, which guides Claude to interview the user and call `task_create`. Tool schemas for `task_create`/`task_update`/`task_list` are enriched at call time with current project and tag lists via a registry refresher, so the LLM sees existing values in the schema without needing an extra `task_list` round-trip. Tags accept both comma-separated strings and JSON arrays.
 - **Soft deletes for tasks** — tasks are never removed from the DB, only set to `status = 'deleted'`. History is preserved.
 - **Daily briefing assembly** — data gathered from RSS feeds, sequential reading lists, AnkiConnect, and task DB, then sent to Claude as a single structured prompt. Result stored in SQLite keyed by date. Idempotent: won't re-assemble if today's briefing exists (unless forced). Can run via cron CLI (`claude-wrapper-briefing`) or the web UI's "assemble" button.
 - **Sequential reading pointers** — each series (Sequences, Gwern, ACX, albums) has a pointer that advances once per day (idempotent via `last_advanced` date check). Supports pause/skip. Gwern/ACX alternate by day-of-year parity, with ACX RSS overriding when a new post appears.

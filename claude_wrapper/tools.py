@@ -20,10 +20,16 @@ _TYPE_MAP: dict[type, str] = {
 
 
 class ToolRegistry:
-    """Register and execute tools that Claude can call."""
+    """Register and execute tools that Claude can call.
+
+    Supports schema refreshers — callables registered via add_refresher()
+    that update tool schemas dynamically before they're served to the API.
+    Used by task tools to inject current project/tag lists into descriptions.
+    """
 
     def __init__(self):
         self._tools: dict[str, ToolDefinition] = {}
+        self._refreshers: list[Callable[[], None]] = []
 
     def tool(
         self,
@@ -69,6 +75,18 @@ class ToolRegistry:
             callable=fn,
         )
 
+    def add_refresher(self, fn: Callable[[], None]) -> None:
+        """Register a callable that updates tool schemas before they're served.
+
+        Refreshers run each time get_definitions() or to_api_format() is called,
+        keeping dynamic descriptions (like existing project/tag lists) current.
+        """
+        self._refreshers.append(fn)
+
+    def _run_refreshers(self) -> None:
+        for fn in self._refreshers:
+            fn()
+
     def execute(self, tool_name: str, tool_input: dict[str, Any]) -> str:
         """Execute a registered tool and return the result as a string."""
         tool = self._tools.get(tool_name)
@@ -85,12 +103,15 @@ class ToolRegistry:
             return json.dumps({"error": str(exc)})
 
     def list_tools(self) -> list[ToolDefinition]:
+        self._run_refreshers()
         return list(self._tools.values())
 
     def to_api_format(self) -> list[dict[str, Any]]:
+        self._run_refreshers()
         return [t.to_api_format() for t in self._tools.values()]
 
     def get_definitions(self) -> list[ToolDefinition]:
+        self._run_refreshers()
         return list(self._tools.values())
 
 
