@@ -44,7 +44,6 @@ const boardPanel = document.getElementById("board-panel");
 const boardContent = document.getElementById("board-content");
 const boardPinsEl = document.getElementById("board-pins");
 const boardInput = document.getElementById("board-input");
-const treePanel = document.getElementById("tree-panel");
 const nodeMap = document.getElementById("node-map");
 const treeSearch = document.getElementById("tree-search");
 const contextBar = document.getElementById("context-bar");
@@ -173,8 +172,6 @@ async function openConversation(id) {
     welcomeEl.style.display = "none";
     messagesEl.style.display = "flex";
     inputArea.style.display = "block";
-    treePanel.style.display = "flex";
-    appEl.classList.add("has-tree");
 
     messagesEl.innerHTML = "";
 
@@ -222,8 +219,6 @@ function showWelcome() {
     welcomeEl.style.display = "flex";
     messagesEl.style.display = "none";
     inputArea.style.display = "none";
-    treePanel.style.display = "none";
-    appEl.classList.remove("has-tree");
     if (ws) { ws.close(); ws = null; }
 }
 
@@ -1079,7 +1074,8 @@ function buildTree() {
     const totalHeight = startY + (maxDepth + 1) * layerGap + 20;
     const totalWidth = baseX + (maxCol - minCol + 1) * colGap + 40;
     const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-    svg.setAttribute("width", Math.max(totalWidth, 180));
+    const svgW = Math.max(totalWidth + centerOffsetX, panelWidth, 180);
+    svg.setAttribute("width", svgW);
     svg.setAttribute("height", totalHeight);
     svg.style.position = "absolute";
     svg.style.top = "0";
@@ -1092,10 +1088,14 @@ function buildTree() {
     spacerDiv.style.pointerEvents = "none";
     nodeMap.appendChild(spacerDiv);
 
+    // Center tree horizontally when content is narrower than the panel
+    const panelWidth = nodeMap.clientWidth || 200;
+    const centerOffsetX = totalWidth < panelWidth ? Math.floor((panelWidth - totalWidth) / 2) : 0;
+
     // Position map — Y from depth, X from column
     const posMap = {};
     layout.forEach((item) => {
-        const x = baseX + (item.col - minCol) * colGap;
+        const x = centerOffsetX + baseX + (item.col - minCol) * colGap;
         const y = startY + item.depth * layerGap;
         posMap[item.id] = { x, y };
     });
@@ -1117,13 +1117,12 @@ function buildTree() {
     }
 
     // Draw depth indicator lines every 10 exchanges
-    const svgWidth = Math.max(totalWidth, 180);
     for (let d = 10; d <= maxDepth; d += 10) {
         const y = startY + d * layerGap;
         const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
         line.setAttribute("x1", 0);
         line.setAttribute("y1", y);
-        line.setAttribute("x2", svgWidth);
+        line.setAttribute("x2", svgW);
         line.setAttribute("y2", y);
         line.setAttribute("stroke", "#eee");
         line.setAttribute("stroke-width", "1");
@@ -1945,8 +1944,8 @@ promptSelect.onchange = async function () {
 // Arrow key navigation for tree panel
 document.addEventListener("keydown", (e) => {
     if (!["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.key)) return;
-    // Only when tree panel is visible
-    if (treePanel.style.display === "none") return;
+    // Only when a conversation is open (tree has nodes)
+    if (treeNodes.length === 0) return;
     // Not when typing in an input
     const active = document.activeElement;
     if (active && (active.tagName === "INPUT" || active.tagName === "TEXTAREA" || active.tagName === "SELECT")) return;

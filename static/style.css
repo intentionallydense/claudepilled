@@ -15,15 +15,9 @@ body {
 
 #app {
     display: grid;
-    /* Chat column capped to content width (640px messages + 3rem padding).
-       Moodboard takes remaining space; tree is fixed 200px when visible. */
-    grid-template-columns: 200px minmax(0, 700px) 1fr;
-    height: 100vh;
-}
-
-/* When tree panel is visible, add a 4th column */
-#app.has-tree {
+    /* sidebar | chat (capped) | moodboard (flex) | tree (fixed) */
     grid-template-columns: 200px minmax(0, 700px) 1fr 200px;
+    height: 100vh;
 }
 
 /* ------------------------------------------------------------------ */

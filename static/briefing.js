@@ -1235,8 +1235,13 @@ function chatBuildTree() {
     const totalHeight = startY + (maxDepth + 1) * layerGap + 16;
     const totalWidth = baseX + (maxCol - minCol + 1) * colGap + 24;
 
+    // Center tree horizontally when content is narrower than the panel
+    const panelWidth = nodeMap.clientWidth || 200;
+    const centerOffsetX = totalWidth < panelWidth ? Math.floor((panelWidth - totalWidth) / 2) : 0;
+
+    const svgW = Math.max(totalWidth + centerOffsetX, panelWidth, 100);
     const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-    svg.setAttribute("width", Math.max(totalWidth, 100));
+    svg.setAttribute("width", svgW);
     svg.setAttribute("height", totalHeight);
     svg.style.position = "absolute";
     svg.style.top = "0";
@@ -1249,10 +1254,10 @@ function chatBuildTree() {
     spacerDiv.style.pointerEvents = "none";
     nodeMap.appendChild(spacerDiv);
 
-    // Position map — Y from depth, X from column (offset by minCol)
+    // Position map — Y from depth, X from column
     const posMap = {};
     layout.forEach((item) => {
-        const x = baseX + (item.col - minCol) * colGap;
+        const x = centerOffsetX + baseX + (item.col - minCol) * colGap;
         const y = startY + item.depth * layerGap;
         posMap[item.id] = { x, y };
     });
@@ -1273,7 +1278,7 @@ function chatBuildTree() {
     }
 
     // Draw depth indicator lines every 10 exchanges
-    const svgWidth = Math.max(totalWidth, 100);
+    const svgWidth = svgW;
     for (let d = 10; d <= maxDepth; d += 10) {
         const y = startY + d * layerGap;
         const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
@@ -1647,6 +1652,17 @@ document.addEventListener("DOMContentLoaded", () => {
     });
 
     document.getElementById("chat-messages").addEventListener("scroll", chatSyncTreeWithScroll);
+
+    // Tree search filter
+    const chatTreeSearchEl = document.getElementById("chat-tree-search");
+    if (chatTreeSearchEl) {
+        chatTreeSearchEl.addEventListener("input", () => {
+            const query = chatTreeSearchEl.value.toLowerCase().trim();
+            chatTreeNodes.forEach(tn => {
+                tn.el.style.opacity = (!query || (tn.preview && tn.preview.toLowerCase().includes(query))) ? "1" : "0.2";
+            });
+        });
+    }
 
     // Focus chat input on printable character press (matches main chat behavior)
     document.addEventListener("keydown", (e) => {

@@ -628,6 +628,20 @@ body {
     padding: 0.75rem 0.75rem 0.25rem;
 }
 
+.tree-search-container {
+    padding: 0 1rem 0.5rem;
+}
+.tree-search {
+    width: 100%;
+    border: 1px solid #ddd;
+    padding: 0.25rem 0.4rem;
+    font-family: inherit;
+    font-size: 0.7rem;
+    color: #111;
+}
+.tree-search:focus { outline: none; border-color: #111; }
+.tree-search::placeholder { color: #aaa; }
+
 .node-map {
     flex: 1;
     overflow-y: scroll;

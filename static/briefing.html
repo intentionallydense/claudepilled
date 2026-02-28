@@ -6,7 +6,7 @@
     <title>briefing</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/briefing.css?v=6">
+    <link rel="stylesheet" href="/briefing.css?v=7">
 </head>
 <body>
     <div id="briefing-page" class="no-chat">
@@ -79,6 +79,9 @@
         </div>
         <aside id="chat-tree-panel" class="chat-tree-panel" style="display:none;">
             <div class="chat-tree-label">tree</div>
+            <div class="tree-search-container">
+                <input id="chat-tree-search" class="tree-search" type="text" placeholder="search...">
+            </div>
             <div id="chat-node-map" class="node-map"></div>
         </aside>
     </div>
@@ -87,6 +90,6 @@
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/dompurify/dist/purify.min.js"></script>
     <script src="/latex-rendering.js"></script>
-    <script src="/briefing.js?v=8"></script>
+    <script src="/briefing.js?v=9"></script>
 </body>
 </html>
