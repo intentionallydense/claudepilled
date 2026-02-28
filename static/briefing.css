@@ -1,140 +1,17 @@
 /* ------------------------------------------------------------------ */
-/* Reset & base — matches tasks.css conventions                       */
+/* briefing.css — Briefing-specific styles only.                      */
+/* Layout classes (sidebar, messages, input-area, tree-panel, etc.)   */
+/* come from style.css which is loaded first.                         */
 /* ------------------------------------------------------------------ */
-*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
-body {
-    font-family: "SF Mono", Monaco, Consolas, "Courier New", monospace;
-    font-size: 14px;
-    line-height: 1.6;
-    background: #fff;
-    color: #111;
-    min-height: 100vh;
-}
 
 /* ------------------------------------------------------------------ */
-/* Page layout                                                        */
+/* Briefing content — rendered markdown in the right panel            */
 /* ------------------------------------------------------------------ */
-#briefing-page {
-    display: grid;
-    grid-template-columns: 1fr minmax(0, 700px) 200px;
-    height: 100vh;
-    overflow: hidden;
-}
-
-#briefing-page.no-chat {
-    grid-template-columns: 1fr;
-}
-
-
-#briefing-column {
-    max-width: 640px;
-    padding: 1.5rem;
-    overflow-y: auto;
-}
-
-/* ------------------------------------------------------------------ */
-/* Header                                                             */
-/* ------------------------------------------------------------------ */
-.briefing-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 1.5rem;
-    padding-bottom: 1rem;
-    border-bottom: 1px solid #eee;
-}
-
-.briefing-title {
-    font-size: 1rem;
-    font-weight: 600;
-    color: #111;
-}
-
-.briefing-nav {
-    display: flex;
-    gap: 1rem;
-}
-
-.nav-link {
-    color: #888;
-    text-decoration: none;
-    font-size: 0.75rem;
-}
-.nav-link:hover { color: #111; text-decoration: underline; }
-
-/* ------------------------------------------------------------------ */
-/* Date navigation bar                                                */
-/* ------------------------------------------------------------------ */
-.date-bar {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-bottom: 1.5rem;
-    padding: 0.5rem 0;
-    border-bottom: 1px solid #eee;
-}
-
-.date-nav-btn {
-    background: none;
-    border: 1px solid #ddd;
-    padding: 0.25rem 0.5rem;
-    font-family: inherit;
-    font-size: 0.7rem;
-    cursor: pointer;
-    color: #666;
-}
-.date-nav-btn:hover { border-color: #111; color: #111; }
-
-.date-display {
-    font-size: 0.85rem;
-    color: #111;
-    font-weight: 600;
-}
-
-.btn-dark {
-    padding: 0.35rem 0.75rem;
-    background: #111;
-    color: #fff;
-    border: none;
-    cursor: pointer;
-    font-family: inherit;
-    font-size: 0.75rem;
-}
-.btn-dark:hover { background: #333; }
-.btn-dark:disabled {
-    background: #ccc;
-    cursor: not-allowed;
-}
-
-/* ------------------------------------------------------------------ */
-/* Loading / empty states                                             */
-/* ------------------------------------------------------------------ */
-.loading-state,
-.empty-state {
-    text-align: center;
-    padding: 3rem 0;
-    color: #888;
-    font-size: 0.85rem;
-}
-
-.loading-spinner {
-    display: inline-block;
-    animation: spin 1s linear infinite;
-}
-@keyframes spin {
-    from { transform: rotate(0deg); }
-    to { transform: rotate(360deg); }
-}
-
-/* ------------------------------------------------------------------ */
-/* Briefing content — rendered markdown                               */
-/* ------------------------------------------------------------------ */
-.briefing-content {
+.briefing-text {
     line-height: 1.7;
 }
 
-.briefing-content h2 {
+.briefing-text h2 {
     font-size: 0.85rem;
     font-weight: 600;
     color: #111;
@@ -144,25 +21,25 @@ body {
     border-top: 1px solid #eee;
 }
 
-.briefing-content h2:first-child {
+.briefing-text h2:first-child {
     margin-top: 0;
     padding-top: 0;
     border-top: none;
 }
 
-.briefing-content p {
+.briefing-text p {
     font-family: 'Open Sans', Helvetica, Arial, sans-serif;
     font-size: 0.85rem;
     color: #333;
     margin-bottom: 0.75rem;
 }
 
-.briefing-content ul {
+.briefing-text ul {
     list-style: none;
     margin-bottom: 0.75rem;
 }
 
-.briefing-content li {
+.briefing-text li {
     font-family: 'Open Sans', Helvetica, Arial, sans-serif;
     font-size: 0.85rem;
     color: #333;
@@ -171,31 +48,60 @@ body {
     position: relative;
 }
 
-.briefing-content li::before {
+.briefing-text li::before {
     content: "\2022";
     color: #888;
     position: absolute;
     left: 0;
 }
 
-.briefing-content a {
+.briefing-text a {
     color: #111;
     text-decoration: underline;
     text-decoration-color: #ccc;
     text-underline-offset: 2px;
 }
-.briefing-content a:hover {
+.briefing-text a:hover {
     text-decoration-color: #111;
 }
 
-.briefing-content strong {
+.briefing-text strong {
     font-weight: 600;
     color: #111;
 }
 
-.briefing-content em {
+.briefing-text em {
     font-style: italic;
     color: #555;
+}
+
+/* ------------------------------------------------------------------ */
+/* Briefing status messages (loading, empty, assembling)              */
+/* ------------------------------------------------------------------ */
+.briefing-status {
+    text-align: center;
+    padding: 3rem 0;
+    color: #888;
+    font-size: 0.85rem;
+}
+
+/* ------------------------------------------------------------------ */
+/* Assemble button (in briefing panel header)                         */
+/* ------------------------------------------------------------------ */
+.briefing-assemble-btn {
+    margin-left: auto;
+    padding: 0.25rem 0.5rem;
+    background: #111;
+    color: #fff;
+    border: none;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 0.7rem;
+}
+.briefing-assemble-btn:hover { background: #333; }
+.briefing-assemble-btn:disabled {
+    background: #ccc;
+    cursor: not-allowed;
 }
 
 /* ------------------------------------------------------------------ */
@@ -248,543 +154,4 @@ body {
 .progress-actions {
     display: flex;
     gap: 0.5rem;
-}
-
-.text-btn {
-    background: none;
-    border: none;
-    color: #888;
-    cursor: pointer;
-    font-family: inherit;
-    font-size: 0.7rem;
-    padding: 0;
-}
-.text-btn:hover { color: #111; text-decoration: underline; }
-
-/* ------------------------------------------------------------------ */
-/* Chat panel                                                         */
-/* ------------------------------------------------------------------ */
-.chat-panel {
-    display: flex;
-    flex-direction: column;
-    height: 100vh;
-    border-left: 1px solid #eee;
-    background: #fff;
-}
-
-.select-minimal {
-    background: #fff;
-    color: #111;
-    border: 1px solid #ddd;
-    padding: 0.35rem 0.5rem;
-    font-family: inherit;
-    font-size: 0.8rem;
-    cursor: pointer;
-}
-.select-minimal:focus { outline: none; border-color: #111; }
-
-.chat-panel-title {
-    font-size: 0.75rem;
-    font-weight: 600;
-    color: #888;
-    text-transform: lowercase;
-}
-
-.thinking-toggle {
-    display: flex;
-    align-items: center;
-    gap: 0.35rem;
-    font-size: 0.75rem;
-    color: #888;
-    cursor: pointer;
-    user-select: none;
-}
-.thinking-toggle input[type="checkbox"] { accent-color: #111; }
-
-.cost-display {
-    font-size: 0.7rem;
-    color: #888;
-    white-space: nowrap;
-}
-
-/* Messages area */
-.chat-messages {
-    flex: 1;
-    min-height: 0;
-    overflow-y: auto;
-    padding: 1.5rem;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-}
-
-/* ------------------------------------------------------------------ */
-/* Messages — matches main chat style                                 */
-/* ------------------------------------------------------------------ */
-.message {
-    max-width: 640px;
-    width: 100%;
-    position: relative;
-    margin-bottom: 0;
-}
-
-.message-spacer {
-    height: 12px;
-    max-width: 640px;
-}
-
-.role-label {
-    font-size: 0.65rem;
-    color: #888;
-    letter-spacing: 0.02em;
-    margin-bottom: 0.15rem;
-    text-transform: lowercase;
-}
-
-.message-text {
-    font-family: 'Open Sans', Helvetica, Arial, sans-serif;
-    font-size: 0.85rem;
-    line-height: 1.6;
-    white-space: pre-wrap;
-    word-wrap: break-word;
-}
-.message-text:empty { display: none; }
-
-/* Edit button */
-.message-actions { margin-top: 0.2rem; }
-.edit-btn {
-    background: none;
-    border: none;
-    color: #ccc;
-    cursor: pointer;
-    font-family: inherit;
-    font-size: 0.65rem;
-    padding: 0;
-    opacity: 0;
-    transition: opacity 0.15s;
-}
-.message:hover .edit-btn { opacity: 1; }
-.edit-btn:hover { color: #111; text-decoration: underline; }
-
-/* Edit form */
-.edit-form { margin-top: 0.35rem; }
-.edit-textarea {
-    width: 100%;
-    background: #fff;
-    color: #111;
-    border: 1px solid #ddd;
-    padding: 0.4rem;
-    font-family: 'Open Sans', Helvetica, Arial, sans-serif;
-    font-size: 0.85rem;
-    resize: none;
-    line-height: 1.5;
-    min-height: 50px;
-    overflow: hidden;
-}
-.edit-textarea:focus { outline: none; border-color: #111; }
-.edit-actions {
-    display: flex;
-    gap: 0.5rem;
-    margin-top: 0.25rem;
-}
-.edit-actions button {
-    background: none;
-    border: 1px solid #ddd;
-    padding: 0.2rem 0.4rem;
-    font-family: inherit;
-    font-size: 0.7rem;
-    cursor: pointer;
-    color: #111;
-}
-.edit-actions button:hover { border-color: #111; }
-.edit-actions .edit-send {
-    background: #111;
-    color: #fff;
-    border-color: #111;
-}
-.edit-actions .edit-send:hover { background: #333; }
-
-/* Web search indicator */
-.web-search-indicator {
-    font-size: 0.7rem;
-    color: #888;
-    padding: 0.2rem 0;
-    font-style: italic;
-}
-
-/* ------------------------------------------------------------------ */
-/* Thinking blocks                                                    */
-/* ------------------------------------------------------------------ */
-.thinking-block {
-    border: 1px solid #eee;
-    margin: 0.35rem 0;
-    overflow: hidden;
-}
-.thinking-header {
-    padding: 0.35rem 0.5rem;
-    cursor: pointer;
-    font-size: 0.65rem;
-    color: #888;
-    display: flex;
-    align-items: center;
-    gap: 0.35rem;
-    background: #fafafa;
-}
-.thinking-header .arrow {
-    transition: transform 0.2s;
-    font-size: 7px;
-    color: #aaa;
-}
-.thinking-header.open .arrow { transform: rotate(90deg); }
-.thinking-body {
-    display: none;
-    padding: 0.5rem;
-    border-top: 1px solid #eee;
-}
-.thinking-body.open { display: block; }
-.thinking-content {
-    font-size: 0.75rem;
-    color: #666;
-    font-family: 'Open Sans', Helvetica, Arial, sans-serif;
-    white-space: pre-wrap;
-    line-height: 1.5;
-    max-height: 250px;
-    overflow-y: auto;
-}
-
-/* ------------------------------------------------------------------ */
-/* Tool call blocks                                                   */
-/* ------------------------------------------------------------------ */
-.tool-call {
-    border: 1px solid #eee;
-    margin: 0.35rem 0;
-    overflow: hidden;
-}
-.tool-call-header {
-    padding: 0.35rem 0.5rem;
-    background: #fafafa;
-    cursor: pointer;
-    font-size: 0.65rem;
-    color: #666;
-    display: flex;
-    align-items: center;
-    gap: 0.35rem;
-}
-.tool-call-header .arrow {
-    transition: transform 0.2s;
-    font-size: 7px;
-    color: #aaa;
-}
-.tool-call-header.open .arrow { transform: rotate(90deg); }
-.tool-call-body {
-    padding: 0.5rem;
-    font-size: 0.7rem;
-    display: none;
-    border-top: 1px solid #eee;
-}
-.tool-call-body.open { display: block; }
-.tool-call-body pre {
-    background: #f8f8f8;
-    padding: 0.4rem;
-    overflow-x: auto;
-    margin: 0.2rem 0;
-    font-size: 0.7rem;
-    color: #333;
-}
-.tool-call-body .label {
-    color: #888;
-    font-size: 0.65rem;
-    margin-bottom: 2px;
-}
-
-/* Streaming cursor — used on thinking-content (plain text) */
-.streaming-cursor::after {
-    content: "\25AE";
-    animation: blink 1s step-end infinite;
-    color: #111;
-}
-/* Streaming cursor — used inside markdown rendered content */
-.streaming-cursor-char {
-    animation: blink 1s step-end infinite;
-    color: #111;
-}
-@keyframes blink { 50% { opacity: 0; } }
-
-/* ------------------------------------------------------------------ */
-/* Markdown rendered content (assistant messages)                      */
-/* ------------------------------------------------------------------ */
-.message.assistant .message-text {
-    white-space: normal;
-}
-.message .message-text p {
-    margin: 0 0 0.6em 0;
-}
-.message .message-text p:last-child {
-    margin-bottom: 0;
-}
-.message .message-text h1,
-.message .message-text h2,
-.message .message-text h3,
-.message .message-text h4,
-.message .message-text h5,
-.message .message-text h6 {
-    font-family: 'Open Sans', Helvetica, Arial, sans-serif;
-    margin: 1em 0 0.4em 0;
-    font-weight: 600;
-    line-height: 1.3;
-}
-.message .message-text h1:first-child,
-.message .message-text h2:first-child,
-.message .message-text h3:first-child {
-    margin-top: 0;
-}
-.message .message-text h1 { font-size: 1.25em; }
-.message .message-text h2 { font-size: 1.12em; }
-.message .message-text h3 { font-size: 1.02em; }
-.message .message-text h4,
-.message .message-text h5,
-.message .message-text h6 { font-size: 1em; }
-.message .message-text code {
-    font-family: "SF Mono", Monaco, Consolas, "Courier New", monospace;
-    font-size: 0.85em;
-    background: #f5f5f5;
-    padding: 0.15em 0.35em;
-    border-radius: 3px;
-}
-.message .message-text pre {
-    background: #f5f5f5;
-    padding: 0.75rem;
-    overflow-x: auto;
-    margin: 0.6em 0;
-    border: 1px solid #eee;
-    line-height: 1.45;
-}
-.message .message-text pre code {
-    background: none;
-    padding: 0;
-    font-size: 0.85em;
-}
-.message .message-text ul,
-.message .message-text ol {
-    margin: 0.4em 0;
-    padding-left: 1.5em;
-}
-.message .message-text li {
-    margin: 0.2em 0;
-}
-.message .message-text blockquote {
-    border-left: 3px solid #ddd;
-    margin: 0.6em 0;
-    padding: 0.2em 0.75em;
-    color: #666;
-}
-.message .message-text a {
-    color: #111;
-    text-decoration: underline;
-}
-.message .message-text hr {
-    border: none;
-    border-top: 1px solid #ddd;
-    margin: 1em 0;
-}
-.message .message-text table {
-    border-collapse: collapse;
-    margin: 0.6em 0;
-    width: 100%;
-}
-.message .message-text th,
-.message .message-text td {
-    border: 1px solid #ddd;
-    padding: 0.35em 0.6em;
-    text-align: left;
-    font-size: 0.9em;
-}
-.message .message-text th {
-    background: #f5f5f5;
-    font-weight: 600;
-}
-.message .message-text img {
-    max-width: 100%;
-    height: auto;
-}
-
-/* ------------------------------------------------------------------ */
-/* Chat tree panel                                                    */
-/* ------------------------------------------------------------------ */
-.chat-tree-panel {
-    background: #fff;
-    border-left: 1px solid #eee;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-    height: 100vh;
-}
-
-.chat-tree-label {
-    font-size: 0.65rem;
-    color: #888;
-    letter-spacing: 0.02em;
-    text-transform: lowercase;
-    padding: 0.75rem 0.75rem 0.25rem;
-}
-
-.tree-search-container {
-    padding: 0 1rem 0.5rem;
-}
-.tree-search {
-    width: 100%;
-    border: 1px solid #ddd;
-    padding: 0.25rem 0.4rem;
-    font-family: inherit;
-    font-size: 0.7rem;
-    color: #111;
-}
-.tree-search:focus { outline: none; border-color: #111; }
-.tree-search::placeholder { color: #aaa; }
-
-.node-map {
-    flex: 1;
-    overflow-y: scroll;
-    overflow-x: hidden;
-    padding: 0.5rem;
-    position: relative;
-}
-
-.node-map svg {
-    position: absolute;
-    top: 0;
-    left: 0;
-    pointer-events: none;
-}
-
-.tree-node {
-    position: absolute;
-    border-radius: 50%;
-    cursor: pointer;
-    transition: transform 0.15s;
-    z-index: 1;
-}
-.tree-node:hover { transform: scale(1.4); }
-
-.tree-node.user-node {
-    width: 10px;
-    height: 10px;
-    background: #ccc;
-}
-.tree-node.assistant-node {
-    width: 6px;
-    height: 6px;
-    background: #e0e0e0;
-}
-.tree-node.on-path { background: #111; }
-.tree-node.current-node {
-    box-shadow: 0 0 0 2px #fff, 0 0 0 4px #111;
-}
-.tree-node.scroll-highlight {
-    box-shadow: 0 0 0 2px #fff, 0 0 0 3px #888;
-}
-
-/* ------------------------------------------------------------------ */
-/* Chat input area                                                    */
-/* ------------------------------------------------------------------ */
-.chat-input-area {
-    border-top: 1px solid #eee;
-    padding: 1rem 1.5rem;
-    flex-shrink: 0;
-}
-
-#chat-input {
-    width: 100%;
-    background: #fff;
-    color: #111;
-    border: 1px solid #ddd;
-    padding: 0.5rem;
-    font-family: 'Open Sans', Helvetica, Arial, sans-serif;
-    font-size: 0.85rem;
-    resize: none;
-    max-height: 150px;
-    line-height: 1.5;
-}
-#chat-input:focus { outline: none; border-color: #111; }
-#chat-input::placeholder { color: #aaa; }
-
-.input-actions {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    margin-top: 0.5rem;
-}
-.input-actions-spacer { flex: 1; }
-
-.input-status {
-    font-size: 0.75rem;
-    color: #888;
-}
-
-.send-btn {
-    background: #111;
-    color: #fff;
-    border: none;
-    padding: 0.4rem 1rem;
-    font-family: inherit;
-    font-size: 0.85rem;
-    cursor: pointer;
-}
-.send-btn:hover { background: #333; }
-.send-btn:disabled { background: #ccc; cursor: not-allowed; }
-
-.stop-btn {
-    background: #fff;
-    color: #c00;
-    border: 1px solid #c00;
-    padding: 0.4rem 1rem;
-    font-family: inherit;
-    font-size: 0.85rem;
-    cursor: pointer;
-}
-.stop-btn:hover { background: #fef2f2; }
-
-/* ------------------------------------------------------------------ */
-/* Image support                                                      */
-/* ------------------------------------------------------------------ */
-.message-image {
-    max-width: 100%;
-    max-height: 400px;
-    border-radius: 4px;
-    margin: 0.5rem 0;
-    display: block;
-}
-.image-preview-area {
-    display: flex;
-    gap: 0.5rem;
-    padding: 0.5rem 0;
-    flex-wrap: wrap;
-}
-.image-preview {
-    position: relative;
-    display: inline-block;
-}
-.image-preview img {
-    max-height: 80px;
-    border-radius: 4px;
-    border: 1px solid #ddd;
-}
-.image-preview .remove-btn {
-    position: absolute;
-    top: -6px;
-    right: -6px;
-    width: 18px;
-    height: 18px;
-    border-radius: 50%;
-    background: #111;
-    color: #fff;
-    border: none;
-    font-size: 12px;
-    line-height: 18px;
-    text-align: center;
-    cursor: pointer;
-    padding: 0;
-}
-.image-preview .remove-btn:hover {
-    background: #c00;
 }

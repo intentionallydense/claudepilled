@@ -162,8 +162,13 @@ def _gather_sections(briefing_db: BriefingDatabase, task_db: TaskDatabase) -> di
 
 
 def _get_task_summary(task_db: TaskDatabase) -> list[dict]:
-    """Get the top 5 most urgent tasks for the briefing."""
+    """Get the top 5 most urgent open tasks for the briefing.
+
+    Filters to pending/active tasks only — completed tasks aren't actionable.
+    """
     tasks = task_db.list_tasks()
+    # Only include open tasks — completed ones aren't useful in a morning briefing
+    tasks = [t for t in tasks if t.get("status") in ("pending", "active")]
     for t in tasks:
         for field in ("tags", "depends", "annotations"):
             if isinstance(t.get(field), str):

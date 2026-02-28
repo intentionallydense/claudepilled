@@ -45,6 +45,12 @@ def init(bdb: BriefingDatabase, tdb: TaskDatabase, c: ClaudeClient, mgr: Convers
 router = APIRouter(prefix="/api/briefing", tags=["briefing"])
 
 
+@router.get("/list")
+async def list_briefings():
+    """Return all briefing dates, sorted newest-first."""
+    return briefing_db.list_briefings()
+
+
 @router.get("/today")
 async def get_today_briefing():
     """Get today's briefing, or 404 if not yet assembled."""

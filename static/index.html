@@ -6,7 +6,7 @@
     <title>Claude Wrapper</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/style.css?v=23">
+    <link rel="stylesheet" href="/style.css?v=24">
 </head>
 <body>
     <div id="app">
@@ -70,6 +70,15 @@
             </div>
         </main>
 
+        <!-- Tree panel (adjacent to chat) -->
+        <aside id="tree-panel" class="tree-panel">
+            <div class="section-label" style="padding:1rem 1rem 0.5rem;">tree</div>
+            <div class="tree-search-container">
+                <input id="tree-search" class="tree-search" type="text" placeholder="search...">
+            </div>
+            <div id="node-map" class="node-map"></div>
+        </aside>
+
         <!-- Moodboard panel -->
         <aside id="board-panel" class="board-panel">
             <div class="board-panel-header">
@@ -84,15 +93,6 @@
                     <button id="board-input-btn" class="board-input-btn">pin</button>
                 </div>
             </div>
-        </aside>
-
-        <!-- Tree panel -->
-        <aside id="tree-panel" class="tree-panel">
-            <div class="section-label" style="padding:1rem 1rem 0.5rem;">tree</div>
-            <div class="tree-search-container">
-                <input id="tree-search" class="tree-search" type="text" placeholder="search...">
-            </div>
-            <div id="node-map" class="node-map"></div>
         </aside>
 
     </div>
@@ -128,6 +128,7 @@
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/dompurify/dist/purify.min.js"></script>
     <script src="/latex-rendering.js"></script>
-    <script src="/app.js?v=22"></script>
+    <script src="/chat-core.js?v=1"></script>
+    <script src="/app.js?v=23"></script>
 </body>
 </html>

@@ -25,7 +25,7 @@ Claude Wrapper is a personal web UI and API wrapper around the Anthropic Claude 
 | `briefing_sequential.py` | Reading list pointer management — advances one item/day per series |
 | `briefing_anki.py` | AnkiConnect proxy — pulls review stats, graceful fallback when Anki offline |
 | `briefing_assembly.py` | Orchestrates data gathering + Claude prompt + DB storage. CLI entry point for cron |
-| `briefing_routes.py` | FastAPI routers for `/api/briefing/*`, `/api/reading-progress/*`, `/api/anki/*` |
+| `briefing_routes.py` | FastAPI routers for `/api/briefing/*` (list, get, assemble, chat), `/api/reading-progress/*`, `/api/anki/*` |
 | `file_db.py` | `FileDatabase` — CRUD for uploaded files, per-conversation active file context, tag normalization |
 | `file_routes.py` | FastAPI `APIRouter` for `/api/files/*` endpoints — upload (PDF/MD), tag management, context activation |
 | `pin_db.py` | `PinDatabase` — CRUD for the `pins` table (moodboard). Images stored as data URIs |
@@ -36,13 +36,15 @@ Claude Wrapper is a personal web UI and API wrapper around the Anthropic Claude 
 
 | File | Purpose |
 |------|---------|
-| `index.html` | Main chat page — sidebar, message area, tree panel |
-| `app.js` | Chat UI logic — WebSocket management, message rendering, branching, file modal, tag autocomplete, context bar |
-| `style.css` | Chat page styles — monospace/minimal aesthetic |
+| `index.html` | Main chat page — 4-column layout: sidebar, chat, tree, moodboard |
+| `chat-core.js` | Shared chat module — `createChatCore(config)` factory encapsulating WebSocket streaming, message rendering, tree nav, edit UX, cost display. Used by both `app.js` and `briefing.js` |
+| `app.js` | Chat page logic — sidebar/conversations, moodboard, file modal, tag autocomplete, context bar. Delegates all chat behavior to `chat-core.js` |
+| `style.css` | Shared layout styles — 4-column grid (`sidebar | chat | tree | content`), sidebar, messages, input area, tree panel, board panel. Loaded by both chat and briefing pages |
 | `settings.html/js/css` | Settings page — model defaults, system prompt, prompt library |
 | `couch.html/js/css` | Couch page — two-model conversation UI with markdown rendering, streaming debounce, smart scroll |
 | `tasks.html/js/css` | Task list page — urgency-sorted list, inline CRUD, brain-dump launcher |
-| `briefing.html/js/css` | Daily briefing page — date nav, assembled content, reading progress panel, embedded chat at full parity with main chat (markdown rendering, streaming debounce, smart scroll, tree nav, edit UX, message merging) |
+| `briefing.html/js/css` | Daily briefing page — same 4-column layout as chat. Sidebar lists briefing dates, chat in center, tree adjacent, briefing content + reading progress in right panel. `briefing.css` has only briefing-specific styles (content formatting, progress panel, assemble button) |
+| `latex-rendering.js` | KaTeX integration for rendering LaTeX in chat messages |
 
 ### Data (`data/`)
 
@@ -83,7 +85,9 @@ Claude Wrapper is a personal web UI and API wrapper around the Anthropic Claude 
 - **File storage in SQLite** — file content stored directly in the `files` table (not on disk). 5MB upload limit, 1M character content extraction limit. PDF text extracted via PyMuPDF.
 - **Bidirectional tree layout** — conversation tree branches grow both left and right from the trunk. At branch points, 1st child continues straight, subsequent siblings alternate right/left. Depth indicator lines appear every 10 exchanges.
 - **Arrow key tree navigation** — when the tree panel is visible, arrow keys navigate the conversation tree. Up/Down walk along on-path nodes and scroll the corresponding message into view. Left/Right jump between nodes at the same tree depth (sorted by x position), triggering a branch switch if the target is off-path. Scroll↔tree sync is suppressed for 600ms during arrow nav to prevent the smooth-scroll feedback loop from fighting the highlight. Module-level `treeChildrenMap`, `treeParentMap`, and `arrowNavActive` support this.
-- **Moodboard** — a persistent visual pinning space in a dedicated column between chat and tree. Chat column is capped at ~700px (message width + padding) so the moodboard sits adjacent to the text content rather than being separated by empty space. Supports text, links, images (stored as data URIs), and pinned chat messages. Zero-friction: no tags, categories, or positioning. Images can be dragged/dropped or pasted. Claude has `moodboard_pin`/`moodboard_remove` tools to interact with the board. Pins show source (sylvia/claude) and timestamp, with delete-on-hover. CSS columns masonry layout, newest first.
+- **Moodboard** — a persistent visual pinning space in column 4 (far right). Chat column is capped at ~700px (message width + padding) so the moodboard sits adjacent to the text content rather than being separated by empty space. Supports text, links, images (stored as data URIs), and pinned chat messages. Zero-friction: no tags, categories, or positioning. Images can be dragged/dropped or pasted. Claude has `moodboard_pin`/`moodboard_remove` tools to interact with the board. Pins show source (sylvia/claude) and timestamp, with delete-on-hover. CSS columns masonry layout, newest first.
+- **Shared chat module (`chat-core.js`)** — `createChatCore(config)` factory function that encapsulates all chat state and logic: WebSocket streaming, message rendering (marked + DOMPurify + KaTeX), tree navigation, edit UX, cost tracking, image handling. Both `app.js` and `briefing.js` create instances with page-specific config: DOM element refs, a normalized `apiFetch(method, path, body)` adapter, and optional callbacks (`onTitleUpdate`, `createMessageActions`, `buildSendPayload`, etc.). Pure utilities (`escapeHtml`, `renderMarkdown`, etc.) are top-level exports. No build system — loaded via `<script>` tag before page-specific scripts.
+- **Unified 4-column layout** — both chat and briefing pages share the same CSS grid: `sidebar (200px) | chat (max 700px) | tree (200px) | content (1fr)`. Tree is adjacent to chat for quick branch navigation. On the chat page, column 4 is the moodboard; on the briefing page, it's the briefing content + reading progress. Both pages load `style.css` for shared layout classes; `briefing.css` adds only briefing-specific styles.
 
 ## Data Flow
 

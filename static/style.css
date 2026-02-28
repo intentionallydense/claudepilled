@@ -15,8 +15,8 @@ body {
 
 #app {
     display: grid;
-    /* sidebar | chat (capped) | moodboard (flex) | tree (fixed) */
-    grid-template-columns: 200px minmax(0, 700px) 1fr 200px;
+    /* sidebar | chat (capped) | tree (fixed) | moodboard (flex) */
+    grid-template-columns: 200px minmax(0, 700px) 200px 1fr;
     height: 100vh;
 }
 
@@ -68,12 +68,14 @@ body {
     text-transform: lowercase;
 }
 
-#conversation-list {
+#conversation-list,
+#briefing-list {
     list-style: none;
     margin-bottom: 0.5rem;
 }
 
-#conversation-list li {
+#conversation-list li,
+#briefing-list li {
     padding: 0.25rem 0;
     cursor: pointer;
     font-size: 0.8rem;
@@ -82,8 +84,10 @@ body {
     justify-content: space-between;
     align-items: center;
 }
-#conversation-list li:hover { text-decoration: underline; color: #111; }
-#conversation-list li.active { font-weight: 600; color: #111; }
+#conversation-list li:hover,
+#briefing-list li:hover { text-decoration: underline; color: #111; }
+#conversation-list li.active,
+#briefing-list li.active { font-weight: 600; color: #111; }
 
 #conversation-list li .delete-btn {
     background: none;
@@ -170,11 +174,13 @@ body {
     flex: 1;
     min-height: 0;  /* allow flex item to shrink below content size */
     overflow-y: auto;
+    scrollbar-width: none;
     padding: 1.5rem;
     display: flex;
     flex-direction: column;
     align-items: center;
 }
+.messages::-webkit-scrollbar { display: none; }
 
 /* ------------------------------------------------------------------ */
 /* Messages                                                           */
@@ -555,6 +561,8 @@ body {
 .board-panel-header {
     padding: 0.6rem 0.75rem 0.4rem;
     flex-shrink: 0;
+    display: flex;
+    align-items: center;
 }
 
 .board-content {
@@ -699,6 +707,7 @@ body {
 .tree-panel {
     background: #fff;
     border-left: 1px solid #eee;
+    border-right: 1px solid #eee;
     display: flex;
     flex-direction: column;
     overflow: hidden;
@@ -723,9 +732,11 @@ body {
     flex: 1;
     overflow-y: scroll;
     overflow-x: hidden;
+    scrollbar-width: none;
     padding: 0.5rem 1rem 1rem;
     position: relative;
 }
+.node-map::-webkit-scrollbar { display: none; }
 
 .node-map svg {
     position: absolute;

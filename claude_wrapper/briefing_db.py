@@ -99,6 +99,18 @@ class BriefingDatabase:
         result["sections"] = json.loads(result["sections"])
         return result
 
+    def list_briefings(self) -> list[dict]:
+        """Return all briefing dates, sorted newest-first."""
+        conn = self._connect()
+        rows = conn.execute(
+            "SELECT date, chat_conversation_id FROM briefings ORDER BY date DESC"
+        ).fetchall()
+        conn.close()
+        return [
+            {"date": r["date"], "has_chat": bool(r["chat_conversation_id"])}
+            for r in rows
+        ]
+
     def set_chat_conversation_id(self, date_str: str, conversation_id: str) -> None:
         """Link a chat conversation to a briefing date."""
         conn = self._connect()

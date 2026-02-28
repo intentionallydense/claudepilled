@@ -6,90 +6,100 @@
     <title>briefing</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/briefing.css?v=7">
+    <link rel="stylesheet" href="/style.css?v=24">
+    <link rel="stylesheet" href="/briefing.css?v=8">
 </head>
 <body>
-    <div id="briefing-page" class="no-chat">
-        <div id="briefing-column">
-            <header class="briefing-header">
-                <h1 class="briefing-title">briefing</h1>
-                <nav class="briefing-nav">
-                    <a href="/" class="nav-link">chat</a>
-                    <a href="/tasks" class="nav-link">tasks</a>
-                    <a href="/couch" class="nav-link">couch</a>
-                    <a href="/settings" class="nav-link">settings</a>
+    <div id="app">
+        <!-- Col 1: sidebar with briefing dates -->
+        <aside id="sidebar">
+            <div class="sidebar-header">
+                <span class="sidebar-title">briefing</span>
+                <nav class="sidebar-nav">
+                    <a href="/" class="text-btn">chat</a>
+                    <a href="/tasks" class="text-btn">tasks</a>
+                    <a href="/couch" class="text-btn">couch</a>
+                    <a href="/settings" class="text-btn">settings</a>
                 </nav>
-            </header>
+            </div>
+            <div class="sidebar-section">
+                <div class="section-label">briefings</div>
+                <ul id="briefing-list"></ul>
+            </div>
+        </aside>
 
-            <!-- Date navigation -->
-            <div class="date-bar">
-                <button id="prev-date" class="date-nav-btn">&larr; prev</button>
-                <span id="date-display" class="date-display"></span>
-                <div style="display:flex;gap:0.5rem;">
-                    <button id="assemble-btn" class="btn-dark">assemble</button>
-                    <button id="next-date" class="date-nav-btn">next &rarr;</button>
+        <!-- Col 2: chat area -->
+        <main id="chat-area">
+            <!-- Welcome screen (no briefing selected) -->
+            <div id="welcome" class="welcome">
+                <div class="welcome-inner">
+                    <h2>briefing</h2>
+                    <p>select a briefing from the sidebar or assemble today's.</p>
                 </div>
             </div>
 
-            <!-- Loading state -->
-            <div id="loading-state" class="loading-state" style="display:none;">
-                <span class="loading-spinner">&#x25e0;</span> loading...
-            </div>
+            <!-- Messages -->
+            <div id="messages" class="messages" style="display:none;"></div>
 
-            <!-- Empty state -->
-            <div id="empty-state" class="empty-state" style="display:none;">
-                no briefing for this date.<br>
-                click "assemble" to generate today's briefing.
-            </div>
-
-            <!-- Assembling state -->
-            <div id="assembling-state" class="loading-state" style="display:none;">
-                <span class="loading-spinner">&#x25e0;</span> assembling briefing — fetching feeds, reading lists, calling claude...
-            </div>
-
-            <!-- Briefing content -->
-            <div id="briefing-content" class="briefing-content" style="display:none;"></div>
-
-            <!-- Reading progress panel -->
-            <div id="progress-panel" class="progress-panel">
-                <div class="progress-title">reading progress</div>
-                <ul id="progress-list" class="progress-list"></ul>
-            </div>
-        </div>
-
-        <div id="chat-panel" class="chat-panel" style="display:none;">
-            <div id="chat-messages" class="chat-messages"></div>
-            <div class="chat-input-area">
-                <div class="chat-input-wrapper">
-                    <textarea id="chat-input" placeholder="ask about today's briefing..." rows="1"></textarea>
+            <!-- Input area -->
+            <div id="input-area" class="input-area" style="display:none;">
+                <div class="input-wrapper">
+                    <textarea id="message-input" placeholder="ask about today's briefing..." rows="1"></textarea>
                     <div class="input-actions">
-                        <select id="chat-model-select" class="select-minimal"></select>
+                        <select id="model-select" class="select-minimal"></select>
                         <label class="thinking-toggle">
-                            <input type="checkbox" id="chat-thinking-checkbox">
+                            <input type="checkbox" id="thinking-checkbox">
                             <span>thinking</span>
                         </label>
-                        <span id="chat-cost-display" class="cost-display"></span>
-                        <span id="chat-input-status" class="input-status"></span>
+                        <span id="cost-display" class="cost-display"></span>
+                        <span id="input-status" class="input-status"></span>
                         <span class="input-actions-spacer"></span>
-                        <button id="chat-send" class="send-btn">send</button>
-                        <button id="chat-stop" class="stop-btn" style="display:none;">stop</button>
+                        <button id="send-btn" class="send-btn">send</button>
+                        <button id="stop-btn" class="stop-btn" style="display:none;">stop</button>
                     </div>
                 </div>
             </div>
-        </div>
-        <aside id="chat-tree-panel" class="chat-tree-panel" style="display:none;">
-            <div class="chat-tree-label">tree</div>
+        </main>
+
+        <!-- Col 3: tree panel -->
+        <aside id="tree-panel" class="tree-panel">
+            <div class="section-label" style="padding:1rem 1rem 0.5rem;">tree</div>
             <div class="tree-search-container">
-                <input id="chat-tree-search" class="tree-search" type="text" placeholder="search...">
+                <input id="tree-search" class="tree-search" type="text" placeholder="search...">
             </div>
-            <div id="chat-node-map" class="node-map"></div>
+            <div id="node-map" class="node-map"></div>
+        </aside>
+
+        <!-- Col 4: briefing content panel -->
+        <aside id="briefing-panel" class="board-panel">
+            <div class="board-panel-header">
+                <span class="section-label" style="margin-bottom:0;">briefing</span>
+                <button id="assemble-btn" class="briefing-assemble-btn">assemble</button>
+            </div>
+            <div class="board-content">
+                <div id="loading-state" class="briefing-status" style="display:none;">loading...</div>
+                <div id="empty-state" class="briefing-status" style="display:none;">
+                    no briefing for this date.<br>
+                    click "assemble" to generate today's briefing.
+                </div>
+                <div id="assembling-state" class="briefing-status" style="display:none;">
+                    assembling briefing — fetching feeds, reading lists, calling claude...
+                </div>
+                <div id="briefing-content" class="briefing-text"></div>
+                <div id="progress-panel" class="progress-panel">
+                    <div class="progress-title">reading progress</div>
+                    <ul id="progress-list" class="progress-list"></ul>
+                </div>
+            </div>
         </aside>
     </div>
+
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.21/dist/katex.min.css">
     <script src="https://cdn.jsdelivr.net/npm/katex@0.16.21/dist/katex.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/dompurify/dist/purify.min.js"></script>
     <script src="/latex-rendering.js"></script>
-    <script src="/briefing.js?v=9"></script>
+    <script src="/chat-core.js?v=1"></script>
+    <script src="/briefing.js?v=10"></script>
 </body>
 </html>
