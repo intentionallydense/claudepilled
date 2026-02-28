@@ -68,7 +68,7 @@ function chatPopulateModelSelect(selectedModel) {
     for (const m of chatAvailableModels) {
         const opt = document.createElement("option");
         opt.value = m.id;
-        opt.textContent = `${m.name} ($${m.input_cost}/$${m.output_cost})`;
+        opt.textContent = m.name;
         if (m.id === selectedModel) opt.selected = true;
         select.appendChild(opt);
     }
@@ -290,6 +290,7 @@ async function markUnread(series) {
 function hideChat() {
     document.getElementById("briefing-page").classList.add("no-chat");
     document.getElementById("chat-panel").style.display = "none";
+    document.getElementById("chat-tree-panel").style.display = "none";
     if (chatWs) { chatWs.close(); chatWs = null; }
     chatConversationId = null;
     chatTreeData = null;
@@ -301,6 +302,7 @@ function hideChat() {
 function showChat() {
     document.getElementById("briefing-page").classList.remove("no-chat");
     document.getElementById("chat-panel").style.display = "flex";
+    document.getElementById("chat-tree-panel").style.display = "flex";
 }
 
 // ------------------------------------------------------------------
@@ -363,6 +365,9 @@ async function chatLoadConversation(conversationId) {
         }
         chatScrollToBottom();
         await chatLoadTree();
+        // Snap tree to bottom to match chat scroll position on load
+        const chatNodeMap = document.getElementById("chat-node-map");
+        if (chatNodeMap) chatNodeMap.scrollTop = chatNodeMap.scrollHeight;
 
         // Auto-toggle thinking: check if last assistant message had thinking blocks
         const thinkingCb = document.getElementById("chat-thinking-checkbox");
@@ -1367,6 +1372,7 @@ function chatHighlightTreeNode(index) {
 function chatSyncTreeWithScroll() {
     if (chatArrowNavActive) return;
     const messagesEl = document.getElementById("chat-messages");
+    const chatNodeMap = document.getElementById("chat-node-map");
     const msgEls = messagesEl.querySelectorAll(".message");
     if (msgEls.length === 0 || chatTreeNodes.length === 0) return;
 
@@ -1375,7 +1381,25 @@ function chatSyncTreeWithScroll() {
     let closestIdx = 0;
     let closestDist = Infinity;
 
-    const onPathNodes = chatTreeNodes.filter(tn => tn.onPath);
+    // Sort by depth so they align with DOM order (shallowest first)
+    const onPathNodes = chatTreeNodes.filter(tn => tn.onPath).sort((a, b) => a.depth - b.depth);
+    if (onPathNodes.length === 0) return;
+
+    // Snap to last node when scrolled to bottom, first when at top
+    const scrollBottom = messagesEl.scrollHeight - messagesEl.scrollTop - messagesEl.clientHeight;
+    if (scrollBottom < 40) {
+        const idx = chatTreeNodes.indexOf(onPathNodes[onPathNodes.length - 1]);
+        if (idx >= 0) chatHighlightTreeNode(idx);
+        if (chatNodeMap) chatNodeMap.scrollTo({ top: chatNodeMap.scrollHeight, behavior: "smooth" });
+        return;
+    }
+    if (messagesEl.scrollTop < 40) {
+        const idx = chatTreeNodes.indexOf(onPathNodes[0]);
+        if (idx >= 0) chatHighlightTreeNode(idx);
+        if (chatNodeMap) chatNodeMap.scrollTo({ top: 0, behavior: "smooth" });
+        return;
+    }
+
     msgEls.forEach((el, i) => {
         const rect = el.getBoundingClientRect();
         const dist = Math.abs(rect.top + rect.height / 2 - centerY);
@@ -1395,7 +1419,7 @@ function chatSyncTreeWithScroll() {
 function chatNavigateTreeArrowKey(direction) {
     if (chatTreeNodes.length === 0) return;
 
-    const onPathNodes = chatTreeNodes.filter(tn => tn.onPath);
+    const onPathNodes = chatTreeNodes.filter(tn => tn.onPath).sort((a, b) => a.depth - b.depth);
     if (onPathNodes.length === 0) return;
 
     // Suppress scroll↔tree sync so the smooth scroll doesn't fight our highlight

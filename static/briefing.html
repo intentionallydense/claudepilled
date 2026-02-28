@@ -6,7 +6,7 @@
     <title>briefing</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/briefing.css?v=5">
+    <link rel="stylesheet" href="/briefing.css?v=6">
 </head>
 <body>
     <div id="briefing-page" class="no-chat">
@@ -58,42 +58,35 @@
         </div>
 
         <div id="chat-panel" class="chat-panel" style="display:none;">
-            <div class="chat-panel-header">
-                <div class="chat-header-left">
-                    <select id="chat-model-select" class="select-minimal"></select>
-                </div>
-                <div class="chat-header-right">
-                    <label class="thinking-toggle">
-                        <input type="checkbox" id="chat-thinking-checkbox">
-                        <span>thinking</span>
-                    </label>
-                    <span id="chat-cost-display" class="cost-display">0 tok | $0.0000</span>
-                </div>
-            </div>
-            <div class="chat-body">
-                <div id="chat-messages" class="chat-messages"></div>
-                <aside id="chat-tree-panel" class="chat-tree-panel">
-                    <div class="chat-tree-label">tree</div>
-                    <div id="chat-node-map" class="node-map"></div>
-                </aside>
-            </div>
+            <div id="chat-messages" class="chat-messages"></div>
             <div class="chat-input-area">
                 <div class="chat-input-wrapper">
                     <textarea id="chat-input" placeholder="ask about today's briefing..." rows="1"></textarea>
                     <div class="input-actions">
+                        <select id="chat-model-select" class="select-minimal"></select>
+                        <label class="thinking-toggle">
+                            <input type="checkbox" id="chat-thinking-checkbox">
+                            <span>thinking</span>
+                        </label>
+                        <span id="chat-cost-display" class="cost-display"></span>
                         <span id="chat-input-status" class="input-status"></span>
+                        <span class="input-actions-spacer"></span>
                         <button id="chat-send" class="send-btn">send</button>
                         <button id="chat-stop" class="stop-btn" style="display:none;">stop</button>
                     </div>
                 </div>
             </div>
         </div>
+        <aside id="chat-tree-panel" class="chat-tree-panel" style="display:none;">
+            <div class="chat-tree-label">tree</div>
+            <div id="chat-node-map" class="node-map"></div>
+        </aside>
     </div>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.21/dist/katex.min.css">
     <script src="https://cdn.jsdelivr.net/npm/katex@0.16.21/dist/katex.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/dompurify/dist/purify.min.js"></script>
     <script src="/latex-rendering.js"></script>
-    <script src="/briefing.js?v=7"></script>
+    <script src="/briefing.js?v=8"></script>
 </body>
 </html>
