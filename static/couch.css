@@ -478,7 +478,9 @@ body {
     resize: vertical;
     line-height: 1.5;
     margin-bottom: 0.75rem;
+    scrollbar-width: none;
 }
+.prompt-textarea::-webkit-scrollbar { display: none; }
 .prompt-textarea:focus { outline: none; border-color: #111; }
 
 .prompt-actions {
