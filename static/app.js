@@ -9,10 +9,10 @@
 // ---------------------------------------------------------------------------
 let currentModel = null;
 let savedPrompts = [];
-let allFiles = [];
 let allTags = [];
-let activeContext = { files: [], total_tokens: 0 };
+let activeContext = { files: [], pins: [], total_tokens: 0 };
 let boardPins = [];
+let boardFiles = [];
 let lastUsageEvent = null;
 
 // DOM elements — page-specific
@@ -30,7 +30,6 @@ const contextBar = document.getElementById("context-bar");
 const contextBarFiles = document.getElementById("context-bar-files");
 const contextTokenCount = document.getElementById("context-token-count");
 const tagAutocomplete = document.getElementById("tag-autocomplete");
-const filesNavBtn = document.getElementById("files-nav-btn");
 const newChatBtn = document.getElementById("new-chat-btn");
 
 // DOM elements — chat (passed to chatCore)
@@ -91,7 +90,11 @@ const chatCore = createChatCore({
     },
 
     onContextUpdate(data) {
-        activeContext = data;
+        activeContext = {
+            files: data.files || [],
+            pins: data.pins || [],
+            total_tokens: data.total_tokens || 0,
+        };
         renderContextBar();
     },
 
@@ -326,175 +329,17 @@ function pinMessage(msgEl) {
 }
 
 // ---------------------------------------------------------------------------
-// File management
+// Tag management (unified: files + pins)
 // ---------------------------------------------------------------------------
-async function loadFiles() {
-    try { allFiles = await api("/files"); }
-    catch (e) { console.error("Failed to load files:", e); allFiles = []; }
-}
-
 async function loadAllTags() {
-    try { allTags = await api("/files/tags"); }
-    catch (e) { allTags = []; }
-}
-
-async function uploadFiles(fileList, tagsStr) {
-    for (const file of fileList) {
-        const form = new FormData();
-        form.append("file", file);
-        form.append("tags", tagsStr);
-        try { await fetch("/api/files/upload", { method: "POST", body: form }); }
-        catch (e) { console.error("Upload failed:", e); }
-    }
-    await loadFiles();
-    await loadAllTags();
-    renderFileList();
-    populateFileFilterTag();
-}
-
-async function deleteFile(fileId) {
-    await api(`/files/${fileId}`, { method: "DELETE" });
-    await loadFiles();
-    await loadAllTags();
-    renderFileList();
-    populateFileFilterTag();
-}
-
-async function updateFileTags(fileId, tags) {
-    await api(`/files/${fileId}`, { method: "PATCH", body: JSON.stringify({ tags }) });
-    await loadFiles();
-    await loadAllTags();
-    renderFileList();
-    populateFileFilterTag();
-}
-
-// ---------------------------------------------------------------------------
-// File modal
-// ---------------------------------------------------------------------------
-function openFileModal() {
-    document.getElementById("file-modal").style.display = "flex";
-    renderFileList();
-    populateFileFilterTag();
-}
-
-function closeFileModal() {
-    document.getElementById("file-modal").style.display = "none";
-}
-
-function populateFileFilterTag() {
-    const select = document.getElementById("file-filter-tag");
-    if (!select) return;
-    const val = select.value;
-    select.innerHTML = '<option value="">all</option>';
-    for (const tag of allTags) {
-        const opt = document.createElement("option");
-        opt.value = tag;
-        opt.textContent = tag;
-        if (tag === val) opt.selected = true;
-        select.appendChild(opt);
-    }
-}
-
-function renderFileList(filterTag) {
-    const listEl = document.getElementById("file-list");
-    if (!listEl) return;
-    listEl.innerHTML = "";
-    let files = allFiles;
-    if (filterTag) {
-        files = files.filter(f => f.tags && f.tags.includes(filterTag));
-    }
-    if (files.length === 0) {
-        listEl.innerHTML = '<div style="color:#aaa;font-size:0.8rem;padding:0.5rem 0;">no files uploaded yet</div>';
-        return;
-    }
-    for (const f of files) {
-        const row = document.createElement("div");
-        row.className = "file-row";
-        row.dataset.fileId = f.id;
-
-        const name = document.createElement("span");
-        name.className = "file-name";
-        name.textContent = f.filename;
-        name.onclick = () => previewFile(f.id, row);
-        row.appendChild(name);
-
-        const tokens = document.createElement("span");
-        tokens.className = "file-tokens";
-        tokens.textContent = formatTokens(f.token_count);
-        row.appendChild(tokens);
-
-        const tagsEl = document.createElement("span");
-        tagsEl.className = "file-tags";
-        for (const tag of (f.tags || [])) {
-            const chip = document.createElement("span");
-            chip.className = "tag-chip";
-            chip.textContent = tag;
-            chip.onclick = () => {
-                document.getElementById("file-filter-tag").value = tag;
-                renderFileList(tag);
-            };
-            tagsEl.appendChild(chip);
-        }
-        row.appendChild(tagsEl);
-
-        const actions = document.createElement("span");
-        actions.className = "file-actions";
-
-        const retagBtn = document.createElement("button");
-        retagBtn.textContent = "retag";
-        retagBtn.onclick = () => startRetag(f, row);
-        actions.appendChild(retagBtn);
-
-        const delBtn = document.createElement("button");
-        delBtn.className = "delete-file-btn";
-        delBtn.textContent = "\u00d7";
-        delBtn.onclick = () => deleteFile(f.id);
-        actions.appendChild(delBtn);
-
-        row.appendChild(actions);
-        listEl.appendChild(row);
-    }
-}
-
-async function previewFile(fileId, row) {
-    const existing = row.querySelector(".file-preview-content");
-    if (existing) { existing.remove(); return; }
     try {
-        const data = await api(`/files/${fileId}/content`);
-        const preview = document.createElement("div");
-        preview.className = "file-preview-content";
-        preview.textContent = (data.content || "").slice(0, 2000);
-        if (data.content && data.content.length > 2000) {
-            preview.textContent += "\n\n... (truncated)";
-        }
-        row.appendChild(preview);
-    } catch (e) {
-        console.error("Failed to preview file:", e);
-    }
-}
-
-function startRetag(file, row) {
-    document.querySelectorAll(".retag-form").forEach(f => f.remove());
-    const form = document.createElement("div");
-    form.className = "retag-form";
-    const input = document.createElement("input");
-    input.type = "text";
-    input.value = (file.tags || []).join(", ");
-    input.placeholder = "tags (comma-separated)";
-    form.appendChild(input);
-    const saveBtn = document.createElement("button");
-    saveBtn.textContent = "save";
-    saveBtn.onclick = async () => {
-        const newTags = input.value.split(",").map(t => t.trim()).filter(Boolean);
-        await updateFileTags(file.id, newTags);
-        form.remove();
-    };
-    form.appendChild(saveBtn);
-    row.appendChild(form);
-    input.focus();
-    input.addEventListener("keydown", (e) => {
-        if (e.key === "Enter") { e.preventDefault(); saveBtn.click(); }
-    });
+        const [fileTags, pinTags] = await Promise.all([
+            api("/files/tags"),
+            api("/pins/tags"),
+        ]);
+        const merged = new Set([...fileTags, ...pinTags]);
+        allTags = [...merged].sort();
+    } catch (e) { allTags = []; }
 }
 
 function formatTokens(n) {
@@ -508,28 +353,36 @@ function formatTokens(n) {
 async function loadContext() {
     const convId = chatCore.getConversationId();
     if (!convId) {
-        activeContext = { files: [], total_tokens: 0 };
+        activeContext = { files: [], pins: [], total_tokens: 0 };
         renderContextBar();
         return;
     }
     try {
-        activeContext = await api(`/conversations/${convId}/context`);
+        const data = await api(`/conversations/${convId}/context`);
+        activeContext = {
+            files: data.files || [],
+            pins: data.pins || [],
+            total_tokens: data.total_tokens || 0,
+        };
     } catch (e) {
-        activeContext = { files: [], total_tokens: 0 };
+        activeContext = { files: [], pins: [], total_tokens: 0 };
     }
     renderContextBar();
 }
 
 function renderContextBar() {
     if (!contextBar) return;
-    if (!activeContext.files || activeContext.files.length === 0) {
+    const hasFiles = activeContext.files && activeContext.files.length > 0;
+    const hasPins = activeContext.pins && activeContext.pins.length > 0;
+    if (!hasFiles && !hasPins) {
         contextBar.style.display = "none";
         return;
     }
     contextBar.style.display = "block";
     contextBarFiles.innerHTML = "";
 
-    for (const f of activeContext.files) {
+    // Render file items
+    for (const f of (activeContext.files || [])) {
         const item = document.createElement("span");
         item.className = "context-file-item";
 
@@ -548,6 +401,35 @@ function renderContextBar() {
         removeBtn.onmousedown = async (e) => {
             e.preventDefault();
             await api(`/conversations/${chatCore.getConversationId()}/context/${f.id}`, { method: "DELETE" });
+            await loadContext();
+        };
+        item.appendChild(removeBtn);
+
+        contextBarFiles.appendChild(item);
+    }
+
+    // Render pin items
+    for (const p of (activeContext.pins || [])) {
+        const item = document.createElement("span");
+        item.className = "context-file-item context-pin-item";
+
+        const nameSpan = document.createElement("span");
+        // Show truncated content as label for pins
+        const label = (p.content || "").slice(0, 30) + (p.content && p.content.length > 30 ? "..." : "");
+        nameSpan.textContent = label;
+        item.appendChild(nameSpan);
+
+        const tokSpan = document.createElement("span");
+        tokSpan.className = "context-file-tokens";
+        tokSpan.textContent = formatTokens(p.token_count);
+        item.appendChild(tokSpan);
+
+        const removeBtn = document.createElement("button");
+        removeBtn.className = "context-remove-btn";
+        removeBtn.textContent = "\u00d7";
+        removeBtn.onmousedown = async (e) => {
+            e.preventDefault();
+            await api(`/conversations/${chatCore.getConversationId()}/context/pin/${p.id}`, { method: "DELETE" });
             await loadContext();
         };
         item.appendChild(removeBtn);
@@ -612,11 +494,16 @@ function hideTagAutocomplete() {
 }
 
 // ---------------------------------------------------------------------------
-// Moodboard
+// Unified board (pins + files merged by date)
 // ---------------------------------------------------------------------------
 async function loadBoard() {
     try {
-        boardPins = await api("/pins");
+        const [pins, files] = await Promise.all([
+            api("/pins"),
+            api("/files"),
+        ]);
+        boardPins = pins;
+        boardFiles = files;
         renderBoard();
     } catch (e) {
         console.error("Failed to load board:", e);
@@ -625,8 +512,21 @@ async function loadBoard() {
 
 function renderBoard() {
     boardPinsEl.innerHTML = "";
+    // Merge pins and files into a single list sorted by date (newest first)
+    const items = [];
     for (const pin of boardPins) {
-        boardPinsEl.appendChild(createPinEl(pin));
+        items.push({ _kind: "pin", _date: pin.created, ...pin });
+    }
+    for (const file of boardFiles) {
+        items.push({ _kind: "file", _date: file.uploaded_at, ...file });
+    }
+    items.sort((a, b) => (b._date || "").localeCompare(a._date || ""));
+    for (const item of items) {
+        if (item._kind === "file") {
+            boardPinsEl.appendChild(createFileCardEl(item));
+        } else {
+            boardPinsEl.appendChild(createPinEl(item));
+        }
     }
 }
 
@@ -673,12 +573,41 @@ function createPinEl(pin) {
         el.appendChild(note);
     }
 
+    // Tag chips (if pin has tags)
+    if (pin.tags && pin.tags.length > 0) {
+        const tagsEl = document.createElement("div");
+        tagsEl.className = "pin-tags";
+        for (const tag of pin.tags) {
+            const chip = document.createElement("span");
+            chip.className = "tag-chip";
+            chip.textContent = tag;
+            tagsEl.appendChild(chip);
+        }
+        // Click tag area to retag
+        tagsEl.onclick = (e) => {
+            e.stopPropagation();
+            startPinRetag(pin, el);
+        };
+        el.appendChild(tagsEl);
+    }
+
     const meta = document.createElement("div");
     meta.className = "pin-meta";
     const src = document.createElement("span");
     src.className = "pin-source";
     src.textContent = pin.source;
     meta.appendChild(src);
+    // Retag link (when no tags)
+    if (!pin.tags || pin.tags.length === 0) {
+        const retagLink = document.createElement("span");
+        retagLink.className = "pin-retag-link";
+        retagLink.textContent = "+tag";
+        retagLink.onclick = (e) => {
+            e.stopPropagation();
+            startPinRetag(pin, el);
+        };
+        meta.appendChild(retagLink);
+    }
     const time = document.createElement("span");
     const d = new Date(pin.created);
     time.textContent = d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
@@ -686,6 +615,136 @@ function createPinEl(pin) {
     el.appendChild(meta);
 
     return el;
+}
+
+function createFileCardEl(file) {
+    const el = document.createElement("div");
+    el.className = "board-pin board-file";
+    el.dataset.fileId = file.id;
+
+    const del = document.createElement("button");
+    del.className = "pin-delete";
+    del.textContent = "\u00d7";
+    del.onclick = async (e) => {
+        e.stopPropagation();
+        await api(`/files/${file.id}`, { method: "DELETE" });
+        el.remove();
+        boardFiles = boardFiles.filter(f => f.id !== file.id);
+        await loadAllTags();
+    };
+    el.appendChild(del);
+
+    // File type label
+    const ext = file.filename.split(".").pop().toLowerCase();
+    const typeLabel = document.createElement("span");
+    typeLabel.className = "file-type-label";
+    typeLabel.textContent = ext;
+    el.appendChild(typeLabel);
+
+    // Filename
+    const nameEl = document.createElement("div");
+    nameEl.className = "file-card-name";
+    nameEl.textContent = file.filename;
+    el.appendChild(nameEl);
+
+    // Tags
+    if (file.tags && file.tags.length > 0) {
+        const tagsEl = document.createElement("div");
+        tagsEl.className = "pin-tags";
+        for (const tag of file.tags) {
+            const chip = document.createElement("span");
+            chip.className = "tag-chip";
+            chip.textContent = tag;
+            tagsEl.appendChild(chip);
+        }
+        tagsEl.onclick = (e) => {
+            e.stopPropagation();
+            startFileRetag(file, el);
+        };
+        el.appendChild(tagsEl);
+    }
+
+    // Token count + retag link
+    const meta = document.createElement("div");
+    meta.className = "pin-meta";
+    const tokSpan = document.createElement("span");
+    tokSpan.textContent = formatTokens(file.token_count);
+    meta.appendChild(tokSpan);
+    if (!file.tags || file.tags.length === 0) {
+        const retagLink = document.createElement("span");
+        retagLink.className = "pin-retag-link";
+        retagLink.textContent = "+tag";
+        retagLink.onclick = (e) => {
+            e.stopPropagation();
+            startFileRetag(file, el);
+        };
+        meta.appendChild(retagLink);
+    }
+    const time = document.createElement("span");
+    const d = new Date(file.uploaded_at);
+    time.textContent = d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+    meta.appendChild(time);
+    el.appendChild(meta);
+
+    return el;
+}
+
+function startPinRetag(pin, el) {
+    // Remove any existing retag forms
+    document.querySelectorAll(".retag-form").forEach(f => f.remove());
+    const form = document.createElement("div");
+    form.className = "retag-form";
+    const input = document.createElement("input");
+    input.type = "text";
+    input.value = (pin.tags || []).join(", ");
+    input.placeholder = "tags (comma-separated)";
+    form.appendChild(input);
+    const saveBtn = document.createElement("button");
+    saveBtn.textContent = "save";
+    saveBtn.onclick = async () => {
+        const newTags = input.value.split(",").map(t => t.trim()).filter(Boolean);
+        await api(`/pins/${pin.id}`, { method: "PATCH", body: JSON.stringify({ tags: newTags }) });
+        form.remove();
+        // Update in-memory and re-render
+        const idx = boardPins.findIndex(p => p.id === pin.id);
+        if (idx >= 0) boardPins[idx].tags = newTags;
+        renderBoard();
+        await loadAllTags();
+    };
+    form.appendChild(saveBtn);
+    el.appendChild(form);
+    input.focus();
+    input.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") { e.preventDefault(); saveBtn.click(); }
+    });
+}
+
+function startFileRetag(file, el) {
+    document.querySelectorAll(".retag-form").forEach(f => f.remove());
+    const form = document.createElement("div");
+    form.className = "retag-form";
+    const input = document.createElement("input");
+    input.type = "text";
+    input.value = (file.tags || []).join(", ");
+    input.placeholder = "tags (comma-separated)";
+    form.appendChild(input);
+    const saveBtn = document.createElement("button");
+    saveBtn.textContent = "save";
+    saveBtn.onclick = async () => {
+        const newTags = input.value.split(",").map(t => t.trim()).filter(Boolean);
+        await api(`/files/${file.id}`, { method: "PATCH", body: JSON.stringify({ tags: newTags }) });
+        form.remove();
+        const idx = boardFiles.findIndex(f => f.id === file.id);
+        if (idx >= 0) boardFiles[idx].tags = newTags;
+        renderBoard();
+        await loadAllTags();
+    };
+    form.appendChild(saveBtn);
+    el.appendChild(form);
+    input.focus();
+    input.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") { e.preventDefault(); saveBtn.click(); }
+    });
 }
 
 async function createPin(type, content, opts = {}) {
@@ -698,10 +757,12 @@ async function createPin(type, content, opts = {}) {
             note: opts.note || null,
             conversation_id: opts.conversation_id || null,
             message_id: opts.message_id || null,
+            tags: opts.tags || [],
         }),
     });
     boardPins.unshift(pin);
     boardPinsEl.prepend(createPinEl(pin));
+    if (opts.tags && opts.tags.length > 0) await loadAllTags();
 }
 
 // ---------------------------------------------------------------------------
@@ -736,40 +797,21 @@ document.addEventListener("keydown", (e) => {
     messageInput.focus({ preventScroll: true });
 });
 
-// File modal
-filesNavBtn.onclick = (e) => { e.preventDefault(); openFileModal(); };
-document.getElementById("file-modal-close").onclick = closeFileModal;
-document.getElementById("file-modal").onclick = (e) => {
-    if (e.target.id === "file-modal") closeFileModal();
-};
-document.getElementById("file-upload-link").onclick = (e) => {
-    e.preventDefault();
-    document.getElementById("file-upload-input").click();
-};
-document.getElementById("file-upload-input").onchange = (e) => {
-    const tagsStr = document.getElementById("file-upload-tags-input").value;
-    uploadFiles(e.target.files, tagsStr);
-    e.target.value = "";
-};
-const uploadArea = document.getElementById("file-upload-area");
-uploadArea.ondragover = (e) => { e.preventDefault(); uploadArea.classList.add("dragover"); };
-uploadArea.ondragleave = () => uploadArea.classList.remove("dragover");
-uploadArea.ondrop = (e) => {
-    e.preventDefault();
-    uploadArea.classList.remove("dragover");
-    const tagsStr = document.getElementById("file-upload-tags-input").value;
-    uploadFiles(e.dataTransfer.files, tagsStr);
-};
-document.getElementById("file-filter-tag").onchange = function() {
-    renderFileList(this.value || undefined);
-};
-
-// Board text input
+// Board text input — extract #tags before pinning
 document.getElementById("board-input-btn").onclick = () => {
     const val = boardInput.value.trim();
     if (!val) return;
-    const type = /^https?:\/\/\S+$/.test(val) ? "link" : "text";
-    createPin(type, val);
+    // Extract #tags
+    const tagRegex = /#([a-zA-Z0-9-]+)/g;
+    const extractedTags = [];
+    let match;
+    while ((match = tagRegex.exec(val)) !== null) {
+        extractedTags.push(match[1].toLowerCase());
+    }
+    const text = val.replace(/#[a-zA-Z0-9-]+/g, "").trim();
+    if (!text) { boardInput.value = ""; return; }
+    const type = /^https?:\/\/\S+$/.test(text) ? "link" : "text";
+    createPin(type, text, { tags: extractedTags });
     boardInput.value = "";
 };
 boardInput.addEventListener("keydown", (e) => {
@@ -793,11 +835,28 @@ boardPanel.addEventListener("drop", async (e) => {
     e.preventDefault();
     boardPanel.classList.remove("dragover");
     if (e.dataTransfer.files.length > 0) {
+        let hasDocFiles = false;
         for (const file of e.dataTransfer.files) {
-            if (!file.type.startsWith("image/")) continue;
-            const reader = new FileReader();
-            reader.onload = () => { createPin("image", reader.result); };
-            reader.readAsDataURL(file);
+            const ext = file.name.split(".").pop().toLowerCase();
+            // PDF/MD files → upload via file API
+            if (ext === "pdf" || ext === "md") {
+                hasDocFiles = true;
+                const form = new FormData();
+                form.append("file", file);
+                form.append("tags", "");
+                try { await fetch("/api/files/upload", { method: "POST", body: form }); }
+                catch (err) { console.error("Upload failed:", err); }
+            }
+            // Image files → pin as data URI
+            else if (file.type.startsWith("image/")) {
+                const reader = new FileReader();
+                reader.onload = () => { createPin("image", reader.result); };
+                reader.readAsDataURL(file);
+            }
+        }
+        if (hasDocFiles) {
+            await loadBoard();
+            await loadAllTags();
         }
         return;
     }
@@ -840,7 +899,6 @@ marked.setOptions({ breaks: true, gfm: true });
 chatCore.attachListeners();
 chatCore.loadModels();
 loadPrompts();
-loadFiles();
 loadAllTags();
 loadBoard();
 loadConversations().then(() => {

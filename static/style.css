@@ -508,7 +508,9 @@ body {
     resize: none;
     max-height: 200px;
     line-height: 1.5;
+    scrollbar-width: none;
 }
+#message-input::-webkit-scrollbar { display: none; }
 #message-input:focus { outline: none; border-color: #111; }
 #message-input::placeholder { color: #aaa; }
 
@@ -577,7 +579,7 @@ body {
     column-gap: 0.5rem;
 }
 .board-pins:empty::after {
-    content: "drag, paste, or pin from chat";
+    content: "drag files, paste images, or pin from chat";
     display: block;
     text-align: center;
     color: #ccc;
@@ -636,6 +638,20 @@ body {
 .board-pin .pin-meta .pin-source {
     font-weight: 600;
 }
+.board-pin .pin-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.2rem;
+    padding: 0.2rem 0.5rem;
+    cursor: pointer;
+}
+.board-pin .pin-retag-link {
+    color: #ccc;
+    font-size: 0.6rem;
+    cursor: pointer;
+}
+.board-pin:hover .pin-retag-link { color: #888; }
+.board-pin .pin-retag-link:hover { color: #111; text-decoration: underline; }
 .board-pin .pin-delete {
     position: absolute;
     top: 3px;
@@ -656,6 +672,29 @@ body {
 }
 .board-pin:hover .pin-delete { opacity: 1; }
 .board-pin .pin-delete:hover { background: #c00; }
+
+/* File cards on the board */
+.board-file {
+    background: #f9f9f9;
+}
+.board-file .file-type-label {
+    display: inline-block;
+    padding: 0.15rem 0.35rem;
+    margin: 0.4rem 0.5rem 0;
+    font-size: 0.6rem;
+    font-weight: 600;
+    color: #888;
+    background: #eee;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+.board-file .file-card-name {
+    padding: 0.25rem 0.5rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: #333;
+    word-break: break-all;
+}
 
 .board-input-area {
     border-top: 1px solid #eee;
@@ -854,7 +893,9 @@ body {
     font-size: 0.85rem;
     resize: vertical;
     line-height: 1.5;
+    scrollbar-width: none;
 }
+.form-textarea::-webkit-scrollbar { display: none; }
 .form-textarea:focus { outline: none; border-color: #111; }
 .form-textarea::placeholder { color: #aaa; }
 
@@ -936,6 +977,9 @@ body {
     line-height: 1;
 }
 .context-remove-btn:hover { color: #c00; }
+.context-pin-item {
+    border-style: dashed;
+}
 
 /* ------------------------------------------------------------------ */
 /* Tag autocomplete                                                    */

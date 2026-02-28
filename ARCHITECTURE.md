@@ -28,9 +28,9 @@ Claude Wrapper is a personal web UI and API wrapper around the Anthropic Claude 
 | `briefing_routes.py` | FastAPI routers for `/api/briefing/*` (list, get, assemble, chat), `/api/reading-progress/*`, `/api/anki/*` |
 | `file_db.py` | `FileDatabase` — CRUD for uploaded files, per-conversation active file context, tag normalization |
 | `file_routes.py` | FastAPI `APIRouter` for `/api/files/*` endpoints — upload (PDF/MD), tag management, context activation |
-| `pin_db.py` | `PinDatabase` — CRUD for the `pins` table (moodboard). Images stored as data URIs |
-| `pin_routes.py` | FastAPI `APIRouter` for `/api/pins/*` endpoints — list, create, upload image, delete |
-| `pin_tools.py` | Claude tool definitions for moodboard (moodboard_pin, moodboard_remove) |
+| `pin_db.py` | `PinDatabase` — CRUD for the `pins` table (moodboard). Images stored as data URIs. Supports tags and per-conversation active pin context |
+| `pin_routes.py` | FastAPI `APIRouter` for `/api/pins/*` endpoints — list, create, upload image, retag (PATCH), delete, list tags |
+| `pin_tools.py` | Claude tool definitions for moodboard (moodboard_pin with optional tags, moodboard_remove) |
 
 ### Frontend (`static/`)
 
@@ -38,7 +38,7 @@ Claude Wrapper is a personal web UI and API wrapper around the Anthropic Claude 
 |------|---------|
 | `index.html` | Main chat page — 4-column layout: sidebar, chat, tree, moodboard |
 | `chat-core.js` | Shared chat module — `createChatCore(config)` factory encapsulating WebSocket streaming, message rendering, tree nav, edit UX, cost display. Used by both `app.js` and `briefing.js` |
-| `app.js` | Chat page logic — sidebar/conversations, moodboard, file modal, tag autocomplete, context bar. Delegates all chat behavior to `chat-core.js` |
+| `app.js` | Chat page logic — sidebar/conversations, unified board (pins + file cards), tag autocomplete, context bar. Delegates all chat behavior to `chat-core.js` |
 | `style.css` | Shared layout styles — 4-column grid (`sidebar | chat | tree | content`), sidebar, messages, input area, tree panel, board panel. Loaded by both chat and briefing pages |
 | `settings.html/js/css` | Settings page — model defaults, system prompt, prompt library |
 | `couch.html/js/css` | Couch page — two-model conversation UI with markdown rendering, streaming debounce, smart scroll |
@@ -80,12 +80,12 @@ Claude Wrapper is a personal web UI and API wrapper around the Anthropic Claude 
 - **Daily briefing assembly** — data gathered from RSS feeds, sequential reading lists, AnkiConnect, and task DB, then sent to Claude as a single structured prompt. Result stored in SQLite keyed by date. Idempotent: won't re-assemble if today's briefing exists (unless forced). Can run via cron CLI (`claude-wrapper-briefing`) or the web UI's "assemble" button.
 - **Sequential reading pointers** — each series (Sequences, Gwern, ACX, albums) has a pointer that advances once per day (idempotent via `last_advanced` date check). Supports pause/skip. Gwern/ACX alternate by day-of-year parity, with ACX RSS overriding when a new post appears.
 - **Briefing feeds fail gracefully** — all feed fetchers return empty lists on error. AnkiConnect returns `{available: false}` when Anki isn't running. The briefing assembles with whatever data is available.
-- **File context via tag injection** — users upload PDF/MD files tagged with keywords. Typing `#tag` in chat activates all files with that tag into the conversation's context. Files are injected into the system prompt as `<injected_files>` XML blocks. Context persists across turns until manually removed. Tag-only messages (no user text) activate context without sending a chat turn.
+- **Unified tag injection (files + pins)** — users upload PDF/MD files tagged with keywords, and pins can also have tags. Typing `#tag` in chat activates all files AND tagged pins matching that tag into the conversation's context. Files are injected into the system prompt as `<injected_files>` XML blocks; pins as `<injected_pins>` XML blocks (image pins excluded — data URIs too large). Both persist across turns until manually removed via context bar. Tag-only messages (no user text) activate context without sending a chat turn. Active state tracked separately: `active_file_ids` and `active_pin_ids` on conversations.
 - **Vision / image paste** — users can paste images from clipboard in any chat interface (main, couch, briefing). Images are sent as base64 `ContentBlock`s with `type: "image"` and a `source` dict. The backend passes them through to the API as content block lists. In couch mode, image blocks are preserved through the role-flipping message builder and merge logic. Images round-trip through SQLite via `model_dump(exclude_none=True)` on ContentBlock.
 - **File storage in SQLite** — file content stored directly in the `files` table (not on disk). 5MB upload limit, 1M character content extraction limit. PDF text extracted via PyMuPDF.
 - **Bidirectional tree layout** — conversation tree branches grow both left and right from the trunk. At branch points, 1st child continues straight, subsequent siblings alternate right/left. Depth indicator lines appear every 10 exchanges.
 - **Arrow key tree navigation** — when the tree panel is visible, arrow keys navigate the conversation tree. Up/Down walk along on-path nodes and scroll the corresponding message into view. Left/Right jump between nodes at the same tree depth (sorted by x position), triggering a branch switch if the target is off-path. Scroll↔tree sync is suppressed for 600ms during arrow nav to prevent the smooth-scroll feedback loop from fighting the highlight. Module-level `treeChildrenMap`, `treeParentMap`, and `arrowNavActive` support this.
-- **Moodboard** — a persistent visual pinning space in column 4 (far right). Chat column is capped at ~700px (message width + padding) so the moodboard sits adjacent to the text content rather than being separated by empty space. Supports text, links, images (stored as data URIs), and pinned chat messages. Zero-friction: no tags, categories, or positioning. Images can be dragged/dropped or pasted. Claude has `moodboard_pin`/`moodboard_remove` tools to interact with the board. Pins show source (sylvia/claude) and timestamp, with delete-on-hover. CSS columns masonry layout, newest first.
+- **Unified board** — column 4 is a unified content board showing both pins and uploaded files in a single masonry layout, merged by date (newest first). Pins support text, links, images (stored as data URIs), and pinned chat messages. Files render as document cards (filename, type label, tags, token count). Both pins and files can have tags, editable inline via retag UI. Typing `some note #tag` in the board input pins "some note" with tag "tag" (zero friction). Dropping PDF/MD files on the board uploads them via the file API. The separate file management modal has been removed — the board is the single interface for all content. Claude has `moodboard_pin` (with optional tags) and `moodboard_remove` tools.
 - **Shared chat module (`chat-core.js`)** — `createChatCore(config)` factory function that encapsulates all chat state and logic: WebSocket streaming, message rendering (marked + DOMPurify + KaTeX), tree navigation, edit UX, cost tracking, image handling. Both `app.js` and `briefing.js` create instances with page-specific config: DOM element refs, a normalized `apiFetch(method, path, body)` adapter, and optional callbacks (`onTitleUpdate`, `createMessageActions`, `buildSendPayload`, etc.). Pure utilities (`escapeHtml`, `renderMarkdown`, etc.) are top-level exports. No build system — loaded via `<script>` tag before page-specific scripts.
 - **Unified 4-column layout** — both chat and briefing pages share the same CSS grid: `sidebar (200px) | chat (max 700px) | tree (200px) | content (1fr)`. Tree is adjacent to chat for quick branch navigation. On the chat page, column 4 is the moodboard; on the briefing page, it's the briefing content + reading progress. Both pages load `style.css` for shared layout classes; `briefing.css` adds only briefing-specific styles.
 
@@ -103,12 +103,17 @@ Browser ─── WebSocket ──→ server.py ──→ ConversationManager �
                 │                             ▲
                 ├── REST ──→ file_routes ──→ FileDatabase
                 │            (upload/tag)     (files table)
-                │                                │
-                └── #tag in message ──→ server resolves tags ──→ active_file_ids on conversation
-                                                                       │
-                                                                       ▼
-                                                          ConversationManager injects
-                                                          file content into system prompt
+                │
+                ├── REST ──→ pin_routes ───→ PinDatabase
+                │            (create/tag)     (pins table)
+                │
+                └── #tag in message ──→ server resolves tags ──→ active_file_ids + active_pin_ids
+                                       (both files & pins)              │
+                                                                        ▼
+                                                           ConversationManager injects
+                                                           files as <injected_files> +
+                                                           pins as <injected_pins> into
+                                                           system prompt
 ```
 
 Settings and prompts flow through REST endpoints → Database.

@@ -79,6 +79,7 @@ class Database:
             ("metadata", "TEXT", "NULL"),
             ("prompt_id", "TEXT", "NULL"),
             ("active_file_ids", "TEXT", "'[]'"),
+            ("active_pin_ids", "TEXT", "'[]'"),
         ]
         for col, col_type, default in conv_migrations:
             try:

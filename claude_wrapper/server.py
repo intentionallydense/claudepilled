@@ -59,6 +59,7 @@ app.include_router(pin_router)
 manager: ConversationManager | None = None
 couch: CouchOrchestrator | None = None
 file_db_instance: FileDatabase | None = None
+pin_db_instance: PinDatabase | None = None
 _static_dir = Path(__file__).resolve().parent.parent / "static"
 
 
@@ -80,7 +81,7 @@ def _load_example_tools() -> ToolRegistry:
 
 @app.on_event("startup")
 async def startup():
-    global manager, couch, file_db_instance
+    global manager, couch, file_db_instance, pin_db_instance
     api_key = os.environ.get("ANTHROPIC_API_KEY", "")
     if not api_key:
         print("WARNING: ANTHROPIC_API_KEY not set. Set it in .env or environment.")
@@ -92,12 +93,12 @@ async def startup():
     init_task_routes(task_db)
     file_db_instance = FileDatabase(db)
     init_file_routes(file_db_instance)
-    pin_db = PinDatabase(db)
-    register_pin_tools(registry, pin_db)
-    init_pin_routes(pin_db)
+    pin_db_instance = PinDatabase(db)
+    register_pin_tools(registry, pin_db_instance)
+    init_pin_routes(pin_db_instance)
     briefing_db = BriefingDatabase(db)
     init_all_series(briefing_db)
-    manager = ConversationManager(client=client, tool_registry=registry, db=db, file_db=file_db_instance)
+    manager = ConversationManager(client=client, tool_registry=registry, db=db, file_db=file_db_instance, pin_db=pin_db_instance)
     init_briefing_routes(briefing_db, task_db, client, manager)
     couch = CouchOrchestrator(client=client, db=db)
 
@@ -281,30 +282,25 @@ async def websocket_chat(ws: WebSocket, conversation_id: str):
             inject_tags = payload.get("inject_tags", [])
 
             # Handle tag injection before processing the message
-            if inject_tags and file_db_instance:
-                matched_files = file_db_instance.get_files_by_tags(inject_tags)
-                if matched_files:
-                    new_ids = [f["id"] for f in matched_files]
-                    file_db_instance.add_active_file_ids(conversation_id, new_ids)
-                    # Emit context_update event
-                    active_ids = file_db_instance.get_active_file_ids(conversation_id)
-                    context_files = []
-                    total_tokens = 0
-                    for fid in active_ids:
-                        f = file_db_instance.get_file(fid)
-                        if f:
-                            context_files.append({
-                                "id": f["id"],
-                                "filename": f["filename"],
-                                "tags": f["tags"],
-                                "token_count": f["token_count"],
-                            })
-                            total_tokens += f["token_count"]
-                    await ws.send_text(json.dumps({
-                        "type": StreamEventType.CONTEXT_UPDATE.value,
-                        "files": context_files,
-                        "total_tokens": total_tokens,
-                    }))
+            if inject_tags:
+                # Resolve files by tags
+                if file_db_instance:
+                    matched_files = file_db_instance.get_files_by_tags(inject_tags)
+                    if matched_files:
+                        new_ids = [f["id"] for f in matched_files]
+                        file_db_instance.add_active_file_ids(conversation_id, new_ids)
+                # Resolve pins by tags
+                if pin_db_instance:
+                    matched_pins = pin_db_instance.get_pins_by_tags(inject_tags)
+                    if matched_pins:
+                        new_pin_ids = [p["id"] for p in matched_pins]
+                        pin_db_instance.add_active_pin_ids(conversation_id, new_pin_ids)
+                # Emit unified context_update event
+                context_data = _build_context_response(conversation_id)
+                await ws.send_text(json.dumps({
+                    "type": StreamEventType.CONTEXT_UPDATE.value,
+                    **context_data,
+                }))
 
             # Tag-only messages (no text content, just tags): activate context and skip chat
             if not user_text and inject_tags:
@@ -584,22 +580,44 @@ async def websocket_couch(ws: WebSocket, session_id: str):
 # Context endpoints (injected files per conversation)
 # ---------------------------------------------------------------------------
 
-@app.get("/api/conversations/{conversation_id}/context")
-async def get_conversation_context(conversation_id: str):
-    active_ids = file_db_instance.get_active_file_ids(conversation_id)
+def _build_context_response(conversation_id: str) -> dict:
+    """Build unified context response with both files and pins."""
     files = []
     total_tokens = 0
-    for fid in active_ids:
-        f = file_db_instance.get_file(fid)
-        if f:
-            files.append({
-                "id": f["id"],
-                "filename": f["filename"],
-                "tags": f["tags"],
-                "token_count": f["token_count"],
-            })
-            total_tokens += f["token_count"]
-    return {"files": files, "total_tokens": total_tokens}
+    if file_db_instance:
+        active_file_ids = file_db_instance.get_active_file_ids(conversation_id)
+        for fid in active_file_ids:
+            f = file_db_instance.get_file(fid)
+            if f:
+                files.append({
+                    "id": f["id"],
+                    "filename": f["filename"],
+                    "tags": f["tags"],
+                    "token_count": f["token_count"],
+                })
+                total_tokens += f["token_count"]
+    pins = []
+    if pin_db_instance:
+        active_pin_ids = pin_db_instance.get_active_pin_ids(conversation_id)
+        for pid in active_pin_ids:
+            p = pin_db_instance.get(pid)
+            if p:
+                # Estimate token count for pins (~4 chars per token)
+                pin_tokens = len(p["content"]) // 4
+                pins.append({
+                    "id": p["id"],
+                    "type": p["type"],
+                    "content": p["content"][:100],  # truncated preview for context bar
+                    "tags": p["tags"],
+                    "token_count": pin_tokens,
+                })
+                total_tokens += pin_tokens
+    return {"files": files, "pins": pins, "total_tokens": total_tokens}
+
+
+@app.get("/api/conversations/{conversation_id}/context")
+async def get_conversation_context(conversation_id: str):
+    return _build_context_response(conversation_id)
 
 
 @app.delete("/api/conversations/{conversation_id}/context/{file_id}")
@@ -608,12 +626,25 @@ async def remove_context_file(conversation_id: str, file_id: str):
     return {"active_file_ids": updated}
 
 
+@app.delete("/api/conversations/{conversation_id}/context/pin/{pin_id}")
+async def remove_context_pin(conversation_id: str, pin_id: str):
+    updated = pin_db_instance.remove_active_pin_ids(conversation_id, [pin_id])
+    return {"active_pin_ids": updated}
+
+
 @app.delete("/api/conversations/{conversation_id}/context/tag/{tag}")
 async def remove_context_tag(conversation_id: str, tag: str):
-    matching = file_db_instance.get_files_by_tags([tag])
-    ids_to_remove = [f["id"] for f in matching]
-    updated = file_db_instance.remove_active_file_ids(conversation_id, ids_to_remove)
-    return {"active_file_ids": updated}
+    # Remove matching files
+    if file_db_instance:
+        matching_files = file_db_instance.get_files_by_tags([tag])
+        file_ids_to_remove = [f["id"] for f in matching_files]
+        file_db_instance.remove_active_file_ids(conversation_id, file_ids_to_remove)
+    # Remove matching pins
+    if pin_db_instance:
+        matching_pins = pin_db_instance.get_pins_by_tags([tag])
+        pin_ids_to_remove = [p["id"] for p in matching_pins]
+        pin_db_instance.remove_active_pin_ids(conversation_id, pin_ids_to_remove)
+    return {"ok": True}
 
 
 # ---------------------------------------------------------------------------

@@ -31,6 +31,17 @@ class CreatePinRequest(BaseModel):
     source: str = "sylvia"
     conversation_id: str | None = None
     message_id: str | None = None
+    tags: list[str] = []
+
+
+class UpdatePinTagsRequest(BaseModel):
+    tags: list[str]
+
+
+@router.get("/tags")
+async def list_pin_tags():
+    """All unique tags across all pins."""
+    return _pin_db.list_all_tags()
 
 
 @router.get("")
@@ -49,6 +60,7 @@ async def create_pin(req: CreatePinRequest):
         source=req.source,
         conversation_id=req.conversation_id,
         message_id=req.message_id,
+        tags=req.tags,
     )
     return pin
 
@@ -70,6 +82,15 @@ async def upload_image_pin(
         note=note,
         source=source,
     )
+    return pin
+
+
+@router.patch("/{pin_id}")
+async def update_pin_tags(pin_id: str, req: UpdatePinTagsRequest):
+    """Update a pin's tags."""
+    pin = _pin_db.update_tags(pin_id, req.tags)
+    if pin is None:
+        return JSONResponse(status_code=404, content={"error": "Pin not found"})
     return pin
 
 
