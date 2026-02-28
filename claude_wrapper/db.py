@@ -80,6 +80,8 @@ class Database:
             ("prompt_id", "TEXT", "NULL"),
             ("active_file_ids", "TEXT", "'[]'"),
             ("active_pin_ids", "TEXT", "'[]'"),
+            ("total_cache_creation_tokens", "INTEGER", "0"),
+            ("total_cache_read_tokens", "INTEGER", "0"),
         ]
         for col, col_type, default in conv_migrations:
             try:
@@ -93,6 +95,8 @@ class Database:
             ("cost", "REAL", "0.0"),
             ("parent_id", "TEXT", "NULL"),
             ("speaker", "TEXT", "NULL"),
+            ("cache_creation_input_tokens", "INTEGER", "0"),
+            ("cache_read_input_tokens", "INTEGER", "0"),
         ]
         for col, col_type, default in msg_migrations:
             try:
@@ -196,6 +200,8 @@ class Database:
             total_input_tokens=row["total_input_tokens"] if "total_input_tokens" in keys else 0,
             total_output_tokens=row["total_output_tokens"] if "total_output_tokens" in keys else 0,
             total_cost=row["total_cost"] if "total_cost" in keys else 0.0,
+            total_cache_creation_tokens=row["total_cache_creation_tokens"] if "total_cache_creation_tokens" in keys else 0,
+            total_cache_read_tokens=row["total_cache_read_tokens"] if "total_cache_read_tokens" in keys else 0,
             prompt_id=row["prompt_id"] if "prompt_id" in keys else None,
         )
 
@@ -305,16 +311,22 @@ class Database:
     def get_conversation_cost(self, conversation_id: str) -> dict:
         conn = self._connect()
         row = conn.execute(
-            "SELECT total_input_tokens, total_output_tokens, total_cost FROM conversations WHERE id = ?",
+            """SELECT total_input_tokens, total_output_tokens, total_cost,
+                      total_cache_creation_tokens, total_cache_read_tokens
+               FROM conversations WHERE id = ?""",
             (conversation_id,),
         ).fetchone()
         conn.close()
         if row is None:
-            return {"input_tokens": 0, "output_tokens": 0, "cost": 0.0}
+            return {"input_tokens": 0, "output_tokens": 0, "cost": 0.0,
+                    "cache_creation_tokens": 0, "cache_read_tokens": 0}
+        keys = row.keys()
         return {
             "input_tokens": row["total_input_tokens"],
             "output_tokens": row["total_output_tokens"],
             "cost": row["total_cost"],
+            "cache_creation_tokens": row["total_cache_creation_tokens"] if "total_cache_creation_tokens" in keys else 0,
+            "cache_read_tokens": row["total_cache_read_tokens"] if "total_cache_read_tokens" in keys else 0,
         }
 
     def set_current_leaf(self, conversation_id: str, leaf_id: str) -> None:
@@ -339,13 +351,16 @@ class Database:
         output_tokens: int = 0,
         cost: float = 0.0,
         speaker: str | None = None,
+        cache_creation_input_tokens: int = 0,
+        cache_read_input_tokens: int = 0,
     ) -> None:
         content_json = self._serialize_content(msg.content)
         conn = self._connect()
         conn.execute(
             """INSERT OR REPLACE INTO messages
-               (id, conversation_id, role, content, created_at, input_tokens, output_tokens, cost, parent_id, speaker)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               (id, conversation_id, role, content, created_at, input_tokens, output_tokens, cost,
+                parent_id, speaker, cache_creation_input_tokens, cache_read_input_tokens)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 msg.id,
                 conversation_id,
@@ -357,6 +372,8 @@ class Database:
                 cost,
                 msg.parent_id,
                 speaker or msg.speaker,
+                cache_creation_input_tokens,
+                cache_read_input_tokens,
             ),
         )
         # Update current_leaf_id and accumulate totals
@@ -366,10 +383,13 @@ class Database:
                SET total_input_tokens = total_input_tokens + ?,
                    total_output_tokens = total_output_tokens + ?,
                    total_cost = total_cost + ?,
+                   total_cache_creation_tokens = total_cache_creation_tokens + ?,
+                   total_cache_read_tokens = total_cache_read_tokens + ?,
                    current_leaf_id = ?,
                    updated_at = ?
                WHERE id = ?""",
-            (input_tokens, output_tokens, cost, msg.id, now, conversation_id),
+            (input_tokens, output_tokens, cost, cache_creation_input_tokens, cache_read_input_tokens,
+             msg.id, now, conversation_id),
         )
         conn.commit()
         conn.close()

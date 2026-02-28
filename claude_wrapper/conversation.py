@@ -156,6 +156,8 @@ class ConversationManager:
             pending_tools: dict[str, dict[str, Any]] = {}
             message_input_tokens: int = 0
             message_output_tokens: int = 0
+            cache_creation_tokens: int = 0
+            cache_read_tokens: int = 0
 
             async for event in self.client.stream(
                 messages=api_messages,
@@ -193,6 +195,10 @@ class ConversationManager:
                         message_input_tokens = event.input_tokens
                     if event.output_tokens:
                         message_output_tokens = event.output_tokens
+                    if event.cache_creation_input_tokens:
+                        cache_creation_tokens = event.cache_creation_input_tokens
+                    if event.cache_read_input_tokens:
+                        cache_read_tokens = event.cache_read_input_tokens
 
             # Build the assistant message
             if thinking_parts:
@@ -211,9 +217,15 @@ class ConversationManager:
                     input=tool_info["input"],
                 ))
 
-            # Compute cost
+            # Compute cost — cache writes cost 1.25x input, cache reads cost 0.1x input
             pricing = MODEL_PRICING.get(conv.model, (3.0, 15.0))
-            cost = (message_input_tokens * pricing[0] + message_output_tokens * pricing[1]) / 1_000_000
+            input_price, output_price = pricing
+            cost = (
+                message_input_tokens * input_price
+                + message_output_tokens * output_price
+                + cache_creation_tokens * (input_price * 1.25)
+                + cache_read_tokens * (input_price * 0.1)
+            ) / 1_000_000
 
             if collected_blocks:
                 assistant_msg = Message(
@@ -228,6 +240,8 @@ class ConversationManager:
                     input_tokens=message_input_tokens,
                     output_tokens=message_output_tokens,
                     cost=cost,
+                    cache_creation_input_tokens=cache_creation_tokens,
+                    cache_read_input_tokens=cache_read_tokens,
                 )
 
             if not pending_tools:
@@ -265,6 +279,8 @@ class ConversationManager:
             type=StreamEventType.USAGE,
             input_tokens=conv_cost["input_tokens"],
             output_tokens=conv_cost["output_tokens"],
+            cache_creation_input_tokens=conv_cost["cache_creation_tokens"],
+            cache_read_input_tokens=conv_cost["cache_read_tokens"],
         )
         yield StreamEvent(type=StreamEventType.MESSAGE_DONE)
 
@@ -312,6 +328,8 @@ class ConversationManager:
             pending_tools: dict[str, dict[str, Any]] = {}
             message_input_tokens: int = 0
             message_output_tokens: int = 0
+            cache_creation_tokens: int = 0
+            cache_read_tokens: int = 0
 
             async for event in self.client.stream(
                 messages=api_messages,
@@ -341,6 +359,10 @@ class ConversationManager:
                         message_input_tokens = event.input_tokens
                     if event.output_tokens:
                         message_output_tokens = event.output_tokens
+                    if event.cache_creation_input_tokens:
+                        cache_creation_tokens = event.cache_creation_input_tokens
+                    if event.cache_read_input_tokens:
+                        cache_read_tokens = event.cache_read_input_tokens
 
             if thinking_parts:
                 collected_blocks.append(ContentBlock(
@@ -356,7 +378,13 @@ class ConversationManager:
                 ))
 
             pricing = MODEL_PRICING.get(conv.model, (3.0, 15.0))
-            cost = (message_input_tokens * pricing[0] + message_output_tokens * pricing[1]) / 1_000_000
+            input_price, output_price = pricing
+            cost = (
+                message_input_tokens * input_price
+                + message_output_tokens * output_price
+                + cache_creation_tokens * (input_price * 1.25)
+                + cache_read_tokens * (input_price * 0.1)
+            ) / 1_000_000
 
             if collected_blocks:
                 assistant_msg = Message(
@@ -364,7 +392,11 @@ class ConversationManager:
                     parent_id=conv.messages[-1].id,
                 )
                 conv.messages.append(assistant_msg)
-                self.db.save_message(conversation_id, assistant_msg, message_input_tokens, message_output_tokens, cost)
+                self.db.save_message(
+                    conversation_id, assistant_msg, message_input_tokens, message_output_tokens, cost,
+                    cache_creation_input_tokens=cache_creation_tokens,
+                    cache_read_input_tokens=cache_read_tokens,
+                )
 
             if not pending_tools:
                 break
@@ -386,6 +418,8 @@ class ConversationManager:
             type=StreamEventType.USAGE,
             input_tokens=conv_cost["input_tokens"],
             output_tokens=conv_cost["output_tokens"],
+            cache_creation_input_tokens=conv_cost["cache_creation_tokens"],
+            cache_read_input_tokens=conv_cost["cache_read_tokens"],
         )
         yield StreamEvent(type=StreamEventType.MESSAGE_DONE)
 

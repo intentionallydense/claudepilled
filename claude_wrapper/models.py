@@ -139,6 +139,8 @@ class Conversation(BaseModel):
     total_input_tokens: int = 0
     total_output_tokens: int = 0
     total_cost: float = 0.0
+    total_cache_creation_tokens: int = 0
+    total_cache_read_tokens: int = 0
 
 
 # ---------------------------------------------------------------------------
@@ -183,6 +185,8 @@ class StreamEvent(BaseModel):
     # For usage
     input_tokens: int | None = None
     output_tokens: int | None = None
+    cache_creation_input_tokens: int | None = None
+    cache_read_input_tokens: int | None = None
     # For error
     error: str | None = None
     # For couch events

@@ -161,7 +161,7 @@ function createChatCore(config) {
     // -----------------------------------------------------------------------
     // Cost display
     // -----------------------------------------------------------------------
-    function updateCostDisplay(inputTokens, outputTokens, cost) {
+    function updateCostDisplay(inputTokens, outputTokens, cost, cacheCreationTokens, cacheReadTokens) {
         if (!el.costDisplay) return;
         const totalTokens = inputTokens + outputTokens;
         let tokenStr;
@@ -173,14 +173,19 @@ function createChatCore(config) {
             tokenStr = String(totalTokens);
         }
         el.costDisplay.textContent = `${tokenStr} tok | $${(cost || 0).toFixed(4)}`;
-        el.costDisplay.title = `in: ${inputTokens} | out: ${outputTokens} | $${(cost || 0).toFixed(6)}`;
+        let tooltip = `in: ${inputTokens} | out: ${outputTokens} | $${(cost || 0).toFixed(6)}`;
+        if (cacheCreationTokens || cacheReadTokens) {
+            tooltip += `\ncache write: ${cacheCreationTokens || 0} | cache read: ${cacheReadTokens || 0}`;
+        }
+        el.costDisplay.title = tooltip;
     }
 
     async function fetchAndUpdateCost() {
         if (!conversationId) return;
         try {
             const data = await apiFetch("GET", `/api/conversations/${conversationId}/cost`);
-            updateCostDisplay(data.input_tokens, data.output_tokens, data.cost);
+            updateCostDisplay(data.input_tokens, data.output_tokens, data.cost,
+                data.cache_creation_tokens, data.cache_read_tokens);
         } catch (e) { /* ignore */ }
     }
 
@@ -1029,6 +1034,8 @@ function createChatCore(config) {
             conv.total_input_tokens || 0,
             conv.total_output_tokens || 0,
             conv.total_cost || 0,
+            conv.total_cache_creation_tokens || 0,
+            conv.total_cache_read_tokens || 0,
         );
 
         renderConversationMessages(conv.messages);

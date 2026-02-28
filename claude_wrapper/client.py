@@ -116,13 +116,15 @@ class ClaudeClient:
 
             async for event in stream:
                 if event.type == "message_start":
-                    # Emit usage with input token count
+                    # Emit usage with input token count + cache breakdown
                     if hasattr(event, "message") and hasattr(event.message, "usage"):
                         usage = event.message.usage
                         yield StreamEvent(
                             type=StreamEventType.USAGE,
                             input_tokens=usage.input_tokens,
                             output_tokens=0,
+                            cache_creation_input_tokens=getattr(usage, "cache_creation_input_tokens", 0) or 0,
+                            cache_read_input_tokens=getattr(usage, "cache_read_input_tokens", 0) or 0,
                         )
 
                 elif event.type == "content_block_start":
@@ -240,7 +242,11 @@ class ClaudeClient:
         }
         sys = system if system is not None else self.system_prompt
         if sys:
-            kwargs["system"] = sys
+            # Use structured block with cache_control so the system prompt
+            # gets cached across turns (90% discount on subsequent reads).
+            kwargs["system"] = [
+                {"type": "text", "text": sys, "cache_control": {"type": "ephemeral"}}
+            ]
         tool_list = [t.to_api_format() for t in tools] if tools else []
         if web_search:
             tool_list.append({"type": "web_search_20250305", "name": "web_search"})
