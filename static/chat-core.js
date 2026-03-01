@@ -23,6 +23,61 @@ function tryParseJSON(str) {
 }
 
 /**
+ * Compress an image file/blob if it exceeds a size threshold.
+ * Uses canvas to resize and re-encode as JPEG. Returns a promise that
+ * resolves to { base64, mediaType } suitable for the API.
+ *
+ * @param {File|Blob} file - image file from clipboard or file input
+ * @param {object} opts - { maxBytes: 1MB, maxDim: 2048, quality: 0.8 }
+ */
+const MAX_IMAGE_BYTES = 1 * 1024 * 1024; // 1 MB threshold
+const MAX_IMAGE_DIM = 2048;
+
+function compressImage(file, opts = {}) {
+    const maxBytes = opts.maxBytes || MAX_IMAGE_BYTES;
+    const maxDim = opts.maxDim || MAX_IMAGE_DIM;
+    const quality = opts.quality || 0.8;
+
+    return new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+            const dataUrl = reader.result;
+            const base64 = dataUrl.split(",")[1];
+            const byteSize = atob(base64).length;
+
+            // Small enough and not a format that needs conversion — use as-is
+            if (byteSize <= maxBytes && (file.type === "image/jpeg" || file.type === "image/png" || file.type === "image/webp")) {
+                resolve({ base64, mediaType: file.type });
+                return;
+            }
+
+            // Need compression — load into canvas
+            const img = new Image();
+            img.onload = () => {
+                let w = img.width, h = img.height;
+                if (w > maxDim || h > maxDim) {
+                    const scale = maxDim / Math.max(w, h);
+                    w = Math.round(w * scale);
+                    h = Math.round(h * scale);
+                }
+                const canvas = document.createElement("canvas");
+                canvas.width = w;
+                canvas.height = h;
+                const ctx = canvas.getContext("2d");
+                ctx.drawImage(img, 0, 0, w, h);
+                const compressed = canvas.toDataURL("image/jpeg", quality);
+                resolve({
+                    base64: compressed.split(",")[1],
+                    mediaType: "image/jpeg",
+                });
+            };
+            img.src = dataUrl;
+        };
+        reader.readAsDataURL(file);
+    });
+}
+
+/**
  * Render markdown for chat messages using marked + DOMPurify + LaTeX.
  * NOT the lightweight briefing-content renderer — this is the full one.
  */
@@ -60,6 +115,216 @@ function appendStreamingCursor(el) {
 function removeStreamingCursor(el) {
     const cursor = el.querySelector(".streaming-cursor-char");
     if (cursor) cursor.remove();
+}
+
+// ---------------------------------------------------------------------------
+// buildTreeLayout — standalone tree renderer shared by chat-core and couch.
+// Takes tree data + a container element, renders SVG connections + node dots.
+// Returns { treeNodes, childrenMap, parentMap } for caller to use.
+//
+// treeData:     { nodes: [...], current_path: [...] } from /api/.../tree
+// nodeMapEl:    container DOM element (will be cleared)
+// layoutConfig: override tree layout constants (layerGap, colGap, etc.)
+// onNodeClick:  callback(nodeId) when a node is clicked, or null
+// ---------------------------------------------------------------------------
+function buildTreeLayout(treeData, nodeMapEl, layoutConfig, onNodeClick) {
+    nodeMapEl.innerHTML = "";
+    const treeNodes = [];
+    if (!treeData || !treeData.nodes || treeData.nodes.length === 0) {
+        return { treeNodes, childrenMap: {}, parentMap: {} };
+    }
+
+    const nodes = treeData.nodes;
+    const currentPath = new Set(treeData.current_path || []);
+
+    // Build children map, skipping tool_result and continuation assistant nodes
+    const skippedIds = new Set();
+    const parentOf = {};
+    const roleOf = {};
+    for (const n of nodes) {
+        parentOf[n.id] = n.parent_id;
+        roleOf[n.id] = n.role;
+        if (n.role === "user" && n.parent_id && !n.preview) {
+            skippedIds.add(n.id);
+        }
+    }
+    for (const n of nodes) {
+        if (n.role !== "assistant" || !n.parent_id) continue;
+        if (!skippedIds.has(n.parent_id)) continue;
+        let ancestor = n.parent_id;
+        while (ancestor && skippedIds.has(ancestor)) {
+            ancestor = parentOf[ancestor];
+        }
+        if (ancestor && roleOf[ancestor] === "assistant") {
+            skippedIds.add(n.id);
+        }
+    }
+
+    const childrenMap = {};
+    const nodeById = {};
+    let rootId = null;
+    for (const n of nodes) {
+        if (skippedIds.has(n.id)) continue;
+        nodeById[n.id] = n;
+
+        let pid = n.parent_id;
+        while (pid && skippedIds.has(pid)) {
+            pid = parentOf[pid];
+        }
+
+        if (!pid) {
+            rootId = n.id;
+        } else {
+            if (!childrenMap[pid]) childrenMap[pid] = [];
+            childrenMap[pid].push(n.id);
+        }
+    }
+
+    if (!rootId) return { treeNodes, childrenMap, parentMap: {} };
+
+    const parentMap = {};
+    for (const n of nodes) {
+        if (skippedIds.has(n.id)) continue;
+        let pid = n.parent_id;
+        while (pid && skippedIds.has(pid)) {
+            pid = parentOf[pid];
+        }
+        if (pid) parentMap[n.id] = pid;
+    }
+
+    // Layout: compact tree
+    const cfg = Object.assign({
+        layerGap: 28, colGap: 24, startY: 16, baseX: 16,
+        nodeRadiusUser: 6, nodeRadiusAssistant: 4,
+        svgMinWidth: 180, heightPad: 20, widthPad: 40,
+    }, layoutConfig || {});
+
+    const layout = [];
+    let nextLeafCol = 0;
+
+    function layoutDfs(nodeId, depth, effectiveParent) {
+        const node = nodeById[nodeId];
+        if (!node) return null;
+
+        const kids = childrenMap[nodeId] || [];
+
+        if (kids.length === 0) {
+            const col = nextLeafCol++;
+            layout.push({ ...node, col, depth, onPath: currentPath.has(nodeId), drawParent: effectiveParent });
+            return col;
+        }
+
+        const childCols = [];
+        for (const kid of kids) {
+            const c = layoutDfs(kid, depth + 1, nodeId);
+            if (c !== null) childCols.push(c);
+        }
+
+        const col = childCols.length > 0
+            ? childCols.reduce((a, b) => a + b, 0) / childCols.length
+            : nextLeafCol++;
+        layout.push({ ...node, col, depth, onPath: currentPath.has(nodeId), drawParent: effectiveParent });
+        return col;
+    }
+
+    layoutDfs(rootId, 0, null);
+
+    const { layerGap, colGap, startY, baseX, nodeRadiusUser, nodeRadiusAssistant, svgMinWidth, heightPad, widthPad } = cfg;
+    const nodeRadius = { user: nodeRadiusUser, assistant: nodeRadiusAssistant };
+
+    const minCol = Math.min(...layout.map(n => n.col));
+    const maxCol = Math.max(...layout.map(n => n.col));
+    const maxDepth = Math.max(...layout.map(n => n.depth));
+    const totalHeight = startY + (maxDepth + 1) * layerGap + heightPad;
+    const totalWidth = baseX + (maxCol - minCol + 1) * colGap + widthPad;
+
+    // Center tree horizontally when content is narrower than the panel
+    const panelWidth = nodeMapEl.clientWidth || 200;
+    const centerOffsetX = totalWidth < panelWidth ? Math.floor((panelWidth - totalWidth) / 2) : 0;
+
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    const svgW = Math.max(totalWidth + centerOffsetX, panelWidth, svgMinWidth);
+    svg.setAttribute("width", svgW);
+    svg.setAttribute("height", totalHeight);
+    svg.style.position = "absolute";
+    svg.style.top = "0";
+    svg.style.left = "0";
+    nodeMapEl.appendChild(svg);
+
+    const spacerDiv = document.createElement("div");
+    spacerDiv.style.height = totalHeight + "px";
+    spacerDiv.style.pointerEvents = "none";
+    nodeMapEl.appendChild(spacerDiv);
+
+    // Position map
+    const posMap = {};
+    layout.forEach((item) => {
+        const x = centerOffsetX + baseX + (item.col - minCol) * colGap;
+        const y = startY + item.depth * layerGap;
+        posMap[item.id] = { x, y };
+    });
+
+    // Draw connections
+    for (const item of layout) {
+        if (item.drawParent && posMap[item.drawParent] && posMap[item.id]) {
+            const p = posMap[item.drawParent];
+            const c = posMap[item.id];
+            const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+            const midY = (p.y + c.y) / 2;
+            path.setAttribute("d", `M${p.x},${p.y} C${p.x},${midY} ${c.x},${midY} ${c.x},${c.y}`);
+            path.setAttribute("stroke", item.onPath && currentPath.has(item.drawParent) ? "#111" : "#ccc");
+            path.setAttribute("stroke-width", item.onPath ? "1.5" : "1");
+            path.setAttribute("fill", "none");
+            svg.appendChild(path);
+        }
+    }
+
+    // Draw depth indicator lines every 10 exchanges
+    for (let d = 10; d <= maxDepth; d += 10) {
+        const y = startY + d * layerGap;
+        const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+        line.setAttribute("x1", 0);
+        line.setAttribute("y1", y);
+        line.setAttribute("x2", svgW);
+        line.setAttribute("y2", y);
+        line.setAttribute("stroke", "#eee");
+        line.setAttribute("stroke-width", "1");
+        svg.appendChild(line);
+
+        const labelEl = document.createElementNS("http://www.w3.org/2000/svg", "text");
+        labelEl.setAttribute("x", 4);
+        labelEl.setAttribute("y", y - 3);
+        labelEl.setAttribute("fill", "#ccc");
+        labelEl.setAttribute("font-size", "9px");
+        labelEl.setAttribute("font-family", "inherit");
+        labelEl.textContent = String(d);
+        svg.appendChild(labelEl);
+    }
+
+    // Draw nodes
+    const lastOnPath = treeData.current_path?.[treeData.current_path.length - 1];
+
+    layout.forEach((item, i) => {
+        const pos = posMap[item.id];
+        const r = nodeRadius[item.role] || 5;
+
+        const node = document.createElement("div");
+        node.className = `tree-node ${item.role}-node`;
+        if (item.onPath) node.classList.add("on-path");
+        if (item.id === lastOnPath) node.classList.add("current-node");
+
+        node.style.left = (pos.x - r) + "px";
+        node.style.top = (pos.y - r) + "px";
+
+        if (onNodeClick) {
+            node.onclick = () => onNodeClick(item.id);
+        }
+
+        nodeMapEl.appendChild(node);
+        treeNodes.push({ id: item.id, index: i, role: item.role, preview: item.preview, x: pos.x, y: pos.y, depth: item.depth, el: node, onPath: item.onPath });
+    });
+
+    return { treeNodes, childrenMap, parentMap };
 }
 
 // ---------------------------------------------------------------------------
@@ -149,12 +414,24 @@ function createChatCore(config) {
     function populateModelSelect(selectedModel) {
         if (!el.modelSelect) return;
         el.modelSelect.innerHTML = "";
+        // Group by provider
+        const byProvider = {};
         for (const m of availableModels) {
-            const opt = document.createElement("option");
-            opt.value = m.id;
-            opt.textContent = m.name;
-            if (m.id === selectedModel) opt.selected = true;
-            el.modelSelect.appendChild(opt);
+            const p = m.provider || "anthropic";
+            if (!byProvider[p]) byProvider[p] = [];
+            byProvider[p].push(m);
+        }
+        for (const [provider, group] of Object.entries(byProvider)) {
+            const optgroup = document.createElement("optgroup");
+            optgroup.label = provider.charAt(0).toUpperCase() + provider.slice(1);
+            for (const m of group) {
+                const opt = document.createElement("option");
+                opt.value = m.id;
+                opt.textContent = m.name;
+                if (m.id === selectedModel) opt.selected = true;
+                optgroup.appendChild(opt);
+            }
+            el.modelSelect.appendChild(optgroup);
         }
     }
 
@@ -197,7 +474,16 @@ function createChatCore(config) {
         const proto = location.protocol === "https:" ? "wss:" : "ws:";
         ws = new WebSocket(`${proto}//${location.host}/api/chat/${convId}`);
         ws.onopen = () => {};
-        ws.onclose = () => { ws = null; };
+        ws.onclose = () => {
+            ws = null;
+            // If we were mid-stream when the connection dropped, reset UI state
+            // so the user isn't stuck with a disabled input
+            if (isStreaming) {
+                isStreaming = false;
+                el.input.disabled = false;
+                showSendButton();
+            }
+        };
         ws.onerror = () => {};
         ws.onmessage = (evt) => {
             const event = JSON.parse(evt.data);
@@ -739,7 +1025,7 @@ function createChatCore(config) {
         }
         textarea.addEventListener("input", autoGrow);
 
-        // Paste images into edit form
+        // Paste images into edit form (with compression)
         textarea.addEventListener("paste", (e) => {
             const items = e.clipboardData?.items;
             if (!items) return;
@@ -747,13 +1033,10 @@ function createChatCore(config) {
                 if (item.type.startsWith("image/")) {
                     e.preventDefault();
                     const file = item.getAsFile();
-                    const reader = new FileReader();
-                    reader.onload = () => {
-                        const base64 = reader.result.split(",")[1];
-                        editPendingImages.push({ type: "image", source: { type: "base64", media_type: item.type, data: base64 } });
+                    compressImage(file).then(({ base64, mediaType }) => {
+                        editPendingImages.push({ type: "image", source: { type: "base64", media_type: mediaType, data: base64 } });
                         renderEditImagePreviews(previewArea);
-                    };
-                    reader.readAsDataURL(file);
+                    });
                     break;
                 }
             }
@@ -839,6 +1122,7 @@ function createChatCore(config) {
             payload.thinking_budget = 10000;
         }
 
+        if (!ws || ws.readyState !== WebSocket.OPEN) return;
         ws.send(JSON.stringify(payload));
         editPendingImages = [];
     }
@@ -899,6 +1183,7 @@ function createChatCore(config) {
         }
 
         delete payload._displayText;  // clean up internal field before sending
+        if (!ws || ws.readyState !== WebSocket.OPEN) return;
         ws.send(JSON.stringify(payload));
         el.input.value = "";
         clearImagePreviews();
@@ -1077,192 +1362,10 @@ function createChatCore(config) {
     }
 
     function buildTree() {
-        el.nodeMap.innerHTML = "";
-        treeNodes = [];
-        if (!treeData || !treeData.nodes || treeData.nodes.length === 0) return;
-
-        const nodes = treeData.nodes;
-        const currentPath = new Set(treeData.current_path || []);
-
-        // Build children map, skipping tool_result and continuation assistant nodes
-        const skippedIds = new Set();
-        const parentOf = {};
-        const roleOf = {};
-        for (const n of nodes) {
-            parentOf[n.id] = n.parent_id;
-            roleOf[n.id] = n.role;
-            if (n.role === "user" && n.parent_id && !n.preview) {
-                skippedIds.add(n.id);
-            }
-        }
-        for (const n of nodes) {
-            if (n.role !== "assistant" || !n.parent_id) continue;
-            if (!skippedIds.has(n.parent_id)) continue;
-            let ancestor = n.parent_id;
-            while (ancestor && skippedIds.has(ancestor)) {
-                ancestor = parentOf[ancestor];
-            }
-            if (ancestor && roleOf[ancestor] === "assistant") {
-                skippedIds.add(n.id);
-            }
-        }
-
-        const childrenMap = {};
-        const nodeById = {};
-        let rootId = null;
-        for (const n of nodes) {
-            if (skippedIds.has(n.id)) continue;
-            nodeById[n.id] = n;
-
-            let pid = n.parent_id;
-            while (pid && skippedIds.has(pid)) {
-                pid = parentOf[pid];
-            }
-
-            if (!pid) {
-                rootId = n.id;
-            } else {
-                if (!childrenMap[pid]) childrenMap[pid] = [];
-                childrenMap[pid].push(n.id);
-            }
-        }
-
-        if (!rootId) return;
-
-        treeChildrenMap = childrenMap;
-        treeParentMap = {};
-        for (const n of nodes) {
-            if (skippedIds.has(n.id)) continue;
-            let pid = n.parent_id;
-            while (pid && skippedIds.has(pid)) {
-                pid = parentOf[pid];
-            }
-            if (pid) treeParentMap[n.id] = pid;
-        }
-
-        // Layout: compact tree
-        const layout = [];
-        let nextLeafCol = 0;
-
-        function layoutDfs(nodeId, depth, effectiveParent) {
-            const node = nodeById[nodeId];
-            if (!node) return null;
-
-            const kids = childrenMap[nodeId] || [];
-
-            if (kids.length === 0) {
-                const col = nextLeafCol++;
-                layout.push({ ...node, col, depth, onPath: currentPath.has(nodeId), drawParent: effectiveParent });
-                return col;
-            }
-
-            const childCols = [];
-            for (const kid of kids) {
-                const c = layoutDfs(kid, depth + 1, nodeId);
-                if (c !== null) childCols.push(c);
-            }
-
-            const col = childCols.length > 0
-                ? childCols.reduce((a, b) => a + b, 0) / childCols.length
-                : nextLeafCol++;
-            layout.push({ ...node, col, depth, onPath: currentPath.has(nodeId), drawParent: effectiveParent });
-            return col;
-        }
-
-        layoutDfs(rootId, 0, null);
-
-        const { layerGap, colGap, startY, baseX, nodeRadiusUser, nodeRadiusAssistant, svgMinWidth, heightPad, widthPad } = treeLayout;
-        const nodeRadius = { user: nodeRadiusUser, assistant: nodeRadiusAssistant };
-
-        const minCol = Math.min(...layout.map(n => n.col));
-        const maxCol = Math.max(...layout.map(n => n.col));
-        const maxDepth = Math.max(...layout.map(n => n.depth));
-        const totalHeight = startY + (maxDepth + 1) * layerGap + heightPad;
-        const totalWidth = baseX + (maxCol - minCol + 1) * colGap + widthPad;
-
-        // Center tree horizontally when content is narrower than the panel
-        const panelWidth = el.nodeMap.clientWidth || 200;
-        const centerOffsetX = totalWidth < panelWidth ? Math.floor((panelWidth - totalWidth) / 2) : 0;
-
-        const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-        const svgW = Math.max(totalWidth + centerOffsetX, panelWidth, svgMinWidth);
-        svg.setAttribute("width", svgW);
-        svg.setAttribute("height", totalHeight);
-        svg.style.position = "absolute";
-        svg.style.top = "0";
-        svg.style.left = "0";
-        el.nodeMap.appendChild(svg);
-
-        const spacerDiv = document.createElement("div");
-        spacerDiv.style.height = totalHeight + "px";
-        spacerDiv.style.pointerEvents = "none";
-        el.nodeMap.appendChild(spacerDiv);
-
-        // Position map
-        const posMap = {};
-        layout.forEach((item) => {
-            const x = centerOffsetX + baseX + (item.col - minCol) * colGap;
-            const y = startY + item.depth * layerGap;
-            posMap[item.id] = { x, y };
-        });
-
-        // Draw connections
-        for (const item of layout) {
-            if (item.drawParent && posMap[item.drawParent] && posMap[item.id]) {
-                const p = posMap[item.drawParent];
-                const c = posMap[item.id];
-                const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-                const midY = (p.y + c.y) / 2;
-                path.setAttribute("d", `M${p.x},${p.y} C${p.x},${midY} ${c.x},${midY} ${c.x},${c.y}`);
-                path.setAttribute("stroke", item.onPath && currentPath.has(item.drawParent) ? "#111" : "#ccc");
-                path.setAttribute("stroke-width", item.onPath ? "1.5" : "1");
-                path.setAttribute("fill", "none");
-                svg.appendChild(path);
-            }
-        }
-
-        // Draw depth indicator lines every 10 exchanges
-        for (let d = 10; d <= maxDepth; d += 10) {
-            const y = startY + d * layerGap;
-            const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
-            line.setAttribute("x1", 0);
-            line.setAttribute("y1", y);
-            line.setAttribute("x2", svgW);
-            line.setAttribute("y2", y);
-            line.setAttribute("stroke", "#eee");
-            line.setAttribute("stroke-width", "1");
-            svg.appendChild(line);
-
-            const labelEl = document.createElementNS("http://www.w3.org/2000/svg", "text");
-            labelEl.setAttribute("x", 4);
-            labelEl.setAttribute("y", y - 3);
-            labelEl.setAttribute("fill", "#ccc");
-            labelEl.setAttribute("font-size", "9px");
-            labelEl.setAttribute("font-family", "inherit");
-            labelEl.textContent = String(d);
-            svg.appendChild(labelEl);
-        }
-
-        // Draw nodes
-        const lastOnPath = treeData.current_path?.[treeData.current_path.length - 1];
-
-        layout.forEach((item, i) => {
-            const pos = posMap[item.id];
-            const r = nodeRadius[item.role] || 5;
-
-            const node = document.createElement("div");
-            node.className = `tree-node ${item.role}-node`;
-            if (item.onPath) node.classList.add("on-path");
-            if (item.id === lastOnPath) node.classList.add("current-node");
-
-            node.style.left = (pos.x - r) + "px";
-            node.style.top = (pos.y - r) + "px";
-
-            node.onclick = () => navigateToNode(item.id);
-
-            el.nodeMap.appendChild(node);
-            treeNodes.push({ id: item.id, index: i, role: item.role, preview: item.preview, x: pos.x, y: pos.y, depth: item.depth, el: node, onPath: item.onPath });
-        });
+        const result = buildTreeLayout(treeData, el.nodeMap, treeLayout, navigateToNode);
+        treeNodes = result.treeNodes;
+        treeChildrenMap = result.childrenMap;
+        treeParentMap = result.parentMap;
     }
 
     async function navigateToNode(nodeId) {
@@ -1439,7 +1542,7 @@ function createChatCore(config) {
             }
         });
 
-        // Image paste
+        // Image paste (with compression)
         el.input.addEventListener("paste", (e) => {
             const items = e.clipboardData?.items;
             if (!items) return;
@@ -1447,13 +1550,10 @@ function createChatCore(config) {
                 if (item.type.startsWith("image/")) {
                     e.preventDefault();
                     const file = item.getAsFile();
-                    const reader = new FileReader();
-                    reader.onload = () => {
-                        const base64 = reader.result.split(",")[1];
-                        pendingImages.push({ type: "image", source: { type: "base64", media_type: item.type, data: base64 } });
+                    compressImage(file).then(({ base64, mediaType }) => {
+                        pendingImages.push({ type: "image", source: { type: "base64", media_type: mediaType, data: base64 } });
                         renderImagePreviews();
-                    };
-                    reader.readAsDataURL(file);
+                    });
                     break;
                 }
             }
@@ -1548,9 +1648,17 @@ function createChatCore(config) {
         attachListeners,
 
         // Send a raw JSON payload through the WebSocket (for regenerate, etc.)
+        // Waits for WS to open if it's still connecting.
         sendRaw(payload) {
-            if (ws && ws.readyState === WebSocket.OPEN) {
+            if (!ws) return;
+            if (ws.readyState === WebSocket.OPEN) {
                 ws.send(JSON.stringify(payload));
+            } else if (ws.readyState === WebSocket.CONNECTING) {
+                const origOnOpen = ws.onopen;
+                ws.onopen = (e) => {
+                    if (origOnOpen) origOnOpen(e);
+                    ws.send(JSON.stringify(payload));
+                };
             }
         },
 

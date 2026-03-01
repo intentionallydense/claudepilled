@@ -6,7 +6,8 @@
     <title>the couch</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/couch.css?v=4">
+    <link rel="stylesheet" href="/style.css?v=25">
+    <link rel="stylesheet" href="/couch.css?v=5">
 </head>
 <body>
     <div id="app">
@@ -27,24 +28,13 @@
             </div>
         </aside>
 
-        <!-- Main feed area -->
-        <main id="feed-area">
+        <!-- Main feed area — uses #chat-area so style.css rules apply -->
+        <main id="chat-area">
             <!-- Welcome screen -->
             <div id="welcome" class="welcome">
                 <div class="welcome-inner">
                     <h2>the couch</h2>
                     <p>two models, one feed. click "the couch" to start a session.</p>
-                </div>
-            </div>
-
-            <!-- Feed header -->
-            <div id="feed-header" class="feed-header" style="display:none;">
-                <div class="feed-header-left">
-                    <span id="model-names" class="model-names clickable" title="edit system prompts"></span>
-                </div>
-                <div class="feed-header-right">
-                    <span id="status-indicator" class="status-indicator">ready</span>
-                    <span id="cost-display" class="cost-display">0 tok | $0.0000</span>
                 </div>
             </div>
 
@@ -54,19 +44,52 @@
             <!-- Curator input -->
             <div id="input-area" class="input-area" style="display:none;">
                 <div class="input-wrapper">
-                    <div class="input-type-selector">
-                        <button class="type-btn active" data-type="share">drop</button>
-                        <button class="type-btn" data-type="nudge">nudge</button>
-                        <button class="type-btn" data-type="jumpin">jump in</button>
+                    <div id="context-bar" class="context-bar" style="display:none;">
+                        <div class="context-bar-header">
+                            <span class="context-bar-label">context</span>
+                            <span id="context-token-count" class="context-token-count"></span>
+                        </div>
+                        <div id="context-bar-files" class="context-bar-files"></div>
                     </div>
                     <textarea id="message-input" placeholder="paste a tweet, quote, or anything..." rows="2"></textarea>
+                    <div id="tag-autocomplete" class="tag-autocomplete"></div>
                     <div class="input-actions">
+                        <span id="model-names" class="model-names clickable" title="edit system prompts"></span>
+                        <span id="cost-display" class="cost-display">0 tok | $0.0000</span>
+                        <span id="status-indicator" class="status-indicator">ready</span>
+                        <span class="input-actions-spacer"></span>
                         <span id="input-status" class="input-status"></span>
-                        <button id="send-btn" class="send-btn">drop it</button>
+                        <button id="send-btn" class="send-btn">send</button>
                     </div>
                 </div>
             </div>
         </main>
+
+        <!-- Tree panel -->
+        <aside id="tree-panel" class="tree-panel">
+            <div class="section-label" style="padding:1rem 1rem 0.5rem;">tree</div>
+            <div class="tree-search-container">
+                <input id="tree-search" class="tree-search" type="text" placeholder="search...">
+            </div>
+            <div id="node-map" class="node-map"></div>
+        </aside>
+
+        <!-- Board panel -->
+        <aside id="board-panel" class="board-panel">
+            <div class="board-panel-header">
+                <span class="section-label" style="margin-bottom:0;">board</span>
+            </div>
+            <div id="board-content" class="board-content">
+                <div id="board-pins" class="board-pins"></div>
+            </div>
+            <div class="board-input-area">
+                <textarea id="board-input" placeholder="pin something... #tag" rows="1"></textarea>
+                <div class="board-input-actions">
+                    <button id="board-input-btn" class="board-input-btn">pin</button>
+                </div>
+            </div>
+        </aside>
+
         <!-- Prompts modal -->
         <div id="prompts-modal" class="modal" style="display:none;">
             <div class="modal-content modal-wide">
@@ -76,9 +99,10 @@
                 </div>
                 <div class="modal-body">
                     <label class="form-label" id="prompt-a-label">seat 1</label>
-                    <textarea id="prompt-a-input" class="prompt-textarea" rows="8"></textarea>
+                    <select id="prompt-a-select" class="form-select"></select>
                     <label class="form-label" id="prompt-b-label">seat 2</label>
-                    <textarea id="prompt-b-input" class="prompt-textarea" rows="6"></textarea>
+                    <select id="prompt-b-select" class="form-select"></select>
+                    <p class="prompt-hint">prompts support variables: {self_label}, {other_label}, {seat_number}</p>
                     <div class="prompt-actions">
                         <button id="save-prompts-btn" class="btn-dark">save</button>
                         <button id="reset-prompts-btn" class="text-btn">reset to defaults</button>
@@ -109,6 +133,7 @@
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/dompurify/dist/purify.min.js"></script>
     <script src="/latex-rendering.js"></script>
-    <script src="/couch.js?v=4"></script>
+    <script src="/chat-core.js"></script>
+    <script src="/couch.js?v=5"></script>
 </body>
 </html>

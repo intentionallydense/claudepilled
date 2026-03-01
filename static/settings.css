@@ -1,5 +1,11 @@
 /* ------------------------------------------------------------------ */
-/* Reset & base                                                       */
+/* settings.css — Standalone settings page. Self-contained because    */
+/* style.css body rules (overflow:hidden) don't suit a scrollable     */
+/* single-column page. Component values kept in sync with style.css.  */
+/* ------------------------------------------------------------------ */
+
+/* ------------------------------------------------------------------ */
+/* Reset & base — matches style.css                                   */
 /* ------------------------------------------------------------------ */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -52,7 +58,7 @@ body {
 .nav-link:hover { color: #111; text-decoration: underline; }
 
 /* ------------------------------------------------------------------ */
-/* Form                                                               */
+/* Form components — synced with style.css values                     */
 /* ------------------------------------------------------------------ */
 .form-label {
     display: block;
@@ -87,12 +93,27 @@ body {
     font-size: 0.85rem;
     resize: vertical;
     line-height: 1.5;
+    scrollbar-width: none;
 }
+.form-textarea::-webkit-scrollbar { display: none; }
 .form-textarea:focus { outline: none; border-color: #111; }
 .form-textarea::placeholder { color: #aaa; }
 
+.form-input {
+    width: 100%;
+    margin-bottom: 0.75rem;
+    background: #fff;
+    color: #111;
+    border: 1px solid #ddd;
+    padding: 0.35rem 0.5rem;
+    font-family: inherit;
+    font-size: 0.8rem;
+}
+.form-input:focus { outline: none; border-color: #111; }
+.form-input::placeholder { color: #aaa; }
+
 /* ------------------------------------------------------------------ */
-/* Actions                                                            */
+/* Buttons — synced with style.css                                    */
 /* ------------------------------------------------------------------ */
 .form-actions {
     display: flex;
@@ -110,6 +131,17 @@ body {
     font-size: 0.85rem;
 }
 .btn-dark:hover { background: #333; }
+
+.text-btn {
+    background: none;
+    border: none;
+    color: #888;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 0.75rem;
+    padding: 0;
+}
+.text-btn:hover { color: #111; text-decoration: underline; }
 
 .save-status {
     font-size: 0.75rem;
@@ -177,32 +209,38 @@ body {
     padding-top: 1rem;
 }
 
-.form-input {
-    width: 100%;
-    margin-bottom: 0.75rem;
-    background: #fff;
-    color: #111;
-    border: 1px solid #ddd;
-    padding: 0.35rem 0.5rem;
-    font-family: inherit;
-    font-size: 0.8rem;
-}
-.form-input:focus { outline: none; border-color: #111; }
-.form-input::placeholder { color: #aaa; }
-
 .prompt-edit-actions {
     display: flex;
     gap: 0.5rem;
     margin-top: 0.5rem;
 }
 
-.text-btn {
-    background: none;
-    border: none;
-    color: #888;
-    cursor: pointer;
-    font-family: inherit;
-    font-size: 0.75rem;
-    padding: 0;
+/* ------------------------------------------------------------------ */
+/* Seat suffix sub-section (under couch prompts)                       */
+/* Same visual weight as the "add prompt" form above it.               */
+/* ------------------------------------------------------------------ */
+.suffix-section {
+    margin-top: 2rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid #eee;
 }
-.text-btn:hover { color: #111; text-decoration: underline; }
+
+.suffix-heading {
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: #111;
+    margin-bottom: 0.5rem;
+}
+
+.suffix-hint {
+    font-size: 0.7rem;
+    color: #888;
+    margin-bottom: 1.25rem;
+    line-height: 1.5;
+}
+
+.suffix-hint code {
+    background: #f5f5f5;
+    padding: 0.1rem 0.3rem;
+    font-size: 0.7rem;
+}

@@ -8,6 +8,7 @@ pkgs.mkShell {
   packages = [
     (python.withPackages (ps: with ps; [
       anthropic
+      openai
       fastapi
       uvicorn
       python-dotenv

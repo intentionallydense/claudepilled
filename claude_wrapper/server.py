@@ -21,7 +21,7 @@ from claude_wrapper.client import ClaudeClient
 from claude_wrapper.conversation import ConversationManager
 from claude_wrapper.couch import CouchOrchestrator
 from claude_wrapper.db import Database
-from claude_wrapper.models import AVAILABLE_MODELS, StreamEventType
+from claude_wrapper.models import AVAILABLE_MODELS, StreamEventType, get_available_models, get_available_providers
 from claude_wrapper.briefing_db import BriefingDatabase
 from claude_wrapper.briefing_routes import (
     anki_router as briefing_anki_router,
@@ -100,7 +100,7 @@ async def startup():
     init_all_series(briefing_db)
     manager = ConversationManager(client=client, tool_registry=registry, db=db, file_db=file_db_instance, pin_db=pin_db_instance)
     init_briefing_routes(briefing_db, task_db, client, manager)
-    couch = CouchOrchestrator(client=client, db=db)
+    couch = CouchOrchestrator(client=client, db=db, file_db=file_db_instance, pin_db=pin_db_instance)
 
     # Migrate old setting key → new name (one-time, idempotent)
     old_val = db.get_setting("default_system_prompt")
@@ -147,7 +147,14 @@ class EditMessageRequest(BaseModel):
 
 @app.get("/api/models")
 async def list_models():
-    return AVAILABLE_MODELS
+    """Return models filtered to only providers with configured API keys."""
+    return get_available_models()
+
+
+@app.get("/api/providers/status")
+async def provider_status():
+    """Return which providers have API keys configured."""
+    return get_available_providers()
 
 
 @app.get("/api/conversations")
@@ -309,7 +316,11 @@ async def websocket_chat(ws: WebSocket, conversation_id: str):
                 }))
                 continue
 
-            if action == "edit":
+            if action == "init":
+                # Model speaks first — no user message needed
+                init_model = payload.get("model", "claude-opus-4-6")
+                gen = manager.stream_init(conversation_id, model=init_model)
+            elif action == "edit":
                 parent_id = payload.get("parent_id") or None
                 if not user_text and not isinstance(user_message, list):
                     continue
@@ -371,7 +382,7 @@ async def get_settings():
 
 @app.put("/api/settings")
 async def put_settings(body: dict):
-    allowed = {"universal_prompt", "default_model"}
+    allowed = {"universal_prompt", "universal_prompt_id", "default_model", "couch_seat_1_suffix", "couch_seat_2_suffix"}
     for key, value in body.items():
         if key in allowed:
             manager.db.set_setting(key, value)
@@ -385,6 +396,7 @@ async def put_settings(body: dict):
 class CreatePromptRequest(BaseModel):
     name: str
     content: str = ""
+    category: str = "chat"
 
 
 class UpdatePromptRequest(BaseModel):
@@ -393,14 +405,14 @@ class UpdatePromptRequest(BaseModel):
 
 
 @app.get("/api/prompts")
-async def list_prompts():
-    return manager.db.list_prompts()
+async def list_prompts(category: str | None = None):
+    return manager.db.list_prompts(category=category)
 
 
 @app.post("/api/prompts")
 async def create_prompt(req: CreatePromptRequest):
     prompt_id = uuid.uuid4().hex[:12]
-    return manager.db.save_prompt(prompt_id, req.name, req.content)
+    return manager.db.save_prompt(prompt_id, req.name, req.content, category=req.category)
 
 
 @app.put("/api/prompts/{prompt_id}")
@@ -410,7 +422,8 @@ async def update_prompt(prompt_id: str, req: UpdatePromptRequest):
         return JSONResponse(status_code=404, content={"error": "Not found"})
     name = req.name if req.name is not None else existing["name"]
     content = req.content if req.content is not None else existing["content"]
-    return manager.db.save_prompt(prompt_id, name, content)
+    category = existing.get("category", "chat")
+    return manager.db.save_prompt(prompt_id, name, content, category=category)
 
 
 @app.delete("/api/prompts/{prompt_id}")
@@ -486,31 +499,27 @@ async def get_couch_session_cost(session_id: str):
 
 @app.get("/api/couch/sessions/{session_id}/prompts")
 async def get_couch_prompts(session_id: str):
-    """Get system prompts for a couch session (custom or defaults)."""
+    """Get prompt IDs for a couch session. Prompt resolution happens at stream time."""
     meta = couch.db.get_conversation_metadata(session_id)
     if meta is None:
         return JSONResponse(status_code=404, content={"error": "Not found"})
-    from claude_wrapper.couch import SYSTEM_PROMPT_A_TEMPLATE, SYSTEM_PROMPT_B_TEMPLATE
-    a_label = meta["model_a"]["label"]
-    b_label = meta["model_b"]["label"]
     return {
-        "prompt_a": meta.get("system_prompt_a") or SYSTEM_PROMPT_A_TEMPLATE.format(
-            self_label=a_label, other_label=b_label,
-        ),
-        "prompt_b": meta.get("system_prompt_b") or SYSTEM_PROMPT_B_TEMPLATE.format(
-            self_label=b_label, other_label=a_label,
-        ),
+        "prompt_id_a": meta.get("prompt_id_a"),
+        "prompt_id_b": meta.get("prompt_id_b"),
     }
 
 
 class UpdateCouchPromptsRequest(BaseModel):
     prompt_a: str | None = None
     prompt_b: str | None = None
+    prompt_id_a: str | None = None
+    prompt_id_b: str | None = None
 
 
 @app.patch("/api/couch/sessions/{session_id}/prompts")
 async def update_couch_prompts(session_id: str, req: UpdateCouchPromptsRequest):
-    """Update system prompts for a couch session. Empty string resets to default."""
+    """Update prompt selection for a couch session. Empty string resets to default.
+    When a prompt_id is set, clears any legacy baked system_prompt for that seat."""
     meta = couch.db.get_conversation_metadata(session_id)
     if meta is None:
         return JSONResponse(status_code=404, content={"error": "Not found"})
@@ -518,6 +527,15 @@ async def update_couch_prompts(session_id: str, req: UpdateCouchPromptsRequest):
         meta["system_prompt_a"] = req.prompt_a if req.prompt_a else None
     if req.prompt_b is not None:
         meta["system_prompt_b"] = req.prompt_b if req.prompt_b else None
+    if req.prompt_id_a is not None:
+        meta["prompt_id_a"] = req.prompt_id_a if req.prompt_id_a else None
+        # Clear legacy baked content when selecting a saved prompt
+        if req.prompt_id_a:
+            meta.pop("system_prompt_a", None)
+    if req.prompt_id_b is not None:
+        meta["prompt_id_b"] = req.prompt_id_b if req.prompt_id_b else None
+        if req.prompt_id_b:
+            meta.pop("system_prompt_b", None)
     couch.db.update_conversation_metadata(session_id, meta)
     return {"ok": True}
 
@@ -533,9 +551,72 @@ async def websocket_couch(ws: WebSocket, session_id: str):
         while True:
             data = await ws.receive_text()
             payload = json.loads(data)
-            # content can be a string or a list of content blocks (for images)
-            content = payload.get("content", "")
-            input_type = payload.get("type", "share")
+            action = payload.get("action")
+            pre_formatted = False
+
+            # Handle tag injection (same logic as chat WS)
+            inject_tags = payload.get("inject_tags", [])
+            if inject_tags:
+                if file_db_instance:
+                    matched_files = file_db_instance.get_files_by_tags(inject_tags)
+                    if matched_files:
+                        new_ids = [f["id"] for f in matched_files]
+                        file_db_instance.add_active_file_ids(session_id, new_ids)
+                if pin_db_instance:
+                    matched_pins = pin_db_instance.get_pins_by_tags(inject_tags)
+                    if matched_pins:
+                        new_pin_ids = [p["id"] for p in matched_pins]
+                        pin_db_instance.add_active_pin_ids(session_id, new_pin_ids)
+                context_data = _build_context_response(session_id)
+                await ws.send_text(json.dumps({
+                    "type": StreamEventType.CONTEXT_UPDATE.value,
+                    **context_data,
+                }))
+
+            # Tag-only message: activate context and skip chat
+            content_for_check = payload.get("content", "")
+            if isinstance(content_for_check, str):
+                has_text = bool(content_for_check.strip())
+            else:
+                has_text = any(
+                    b.get("text") or b.get("type") == "image" for b in content_for_check
+                )
+            if not has_text and inject_tags:
+                await ws.send_text(json.dumps({
+                    "type": StreamEventType.MESSAGE_DONE.value,
+                }))
+                continue
+
+            # Edit: branch from a parent, re-send edited curator input
+            if action == "edit":
+                parent_id = payload.get("parent_id")
+                if parent_id:
+                    couch.db.set_current_leaf(session_id, parent_id)
+                content = payload.get("content", "")
+                input_type = payload.get("type", "share")
+            # Regenerate: re-run from a curator message's starting point
+            elif action == "regenerate":
+                curator_msg_id = payload.get("curator_msg_id")
+                if not curator_msg_id:
+                    continue
+                regen_msg = couch.db.get_message(curator_msg_id)
+                if not regen_msg:
+                    continue
+                # Reset leaf to the curator message's parent (before it was sent)
+                if regen_msg.parent_id:
+                    couch.db.set_current_leaf(session_id, regen_msg.parent_id)
+                # Re-send with the original stored content (already formatted)
+                # Convert ContentBlock list to dicts for stream_turns
+                if isinstance(regen_msg.content, list):
+                    content = [b.model_dump(exclude_none=True) for b in regen_msg.content]
+                else:
+                    content = regen_msg.content
+                input_type = "share"
+                pre_formatted = True
+            else:
+                # Normal message
+                content = payload.get("content", "")
+                input_type = payload.get("type", "share")
 
             # For emptiness check, look at text portion
             if isinstance(content, list):
@@ -550,7 +631,7 @@ async def websocket_couch(ws: WebSocket, session_id: str):
 
             # Run stream in background task so it completes even if WS drops
             queue: asyncio.Queue = asyncio.Queue()
-            gen = couch.stream_turns(session_id, content, input_type)
+            gen = couch.stream_turns(session_id, content, input_type, pre_formatted=pre_formatted)
             task = asyncio.create_task(
                 _run_stream_to_completion(
                     gen, queue, _active_couch_tasks, session_id,

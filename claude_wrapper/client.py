@@ -1,4 +1,12 @@
-"""Core Claude API client wrapper."""
+"""Core Claude API client wrapper and multi-provider routing.
+
+ClaudeClient wraps the Anthropic SDK directly. get_client_for_model() is
+the entry point for multi-provider routing — it returns either a ClaudeClient
+or an OpenAICompatibleClient based on the model's provider, with per-provider
+caching so we don't create duplicate SDK instances.
+
+Used by: conversation.py, couch.py, server.py
+"""
 
 from __future__ import annotations
 
@@ -12,15 +20,61 @@ from typing import Any
 import anthropic
 
 from claude_wrapper.models import (
+    PROVIDERS,
     ContentBlock,
     Message,
     StreamEvent,
     StreamEventType,
     ToolDefinition,
+    get_provider_for_model,
+    get_api_model_id,
 )
 
 DEFAULT_MODEL = "claude-opus-4-6"
 DEFAULT_MAX_TOKENS = 8192
+
+# Per-provider client cache — avoids creating duplicate SDK instances.
+# Key is provider name, value is the client instance.
+_provider_clients: dict[str, Any] = {}
+
+
+def get_client_for_model(model_id: str, anthropic_client: "ClaudeClient | None" = None) -> Any:
+    """Return the right client (ClaudeClient or OpenAICompatibleClient) for a model.
+
+    For Anthropic models, returns the passed-in ClaudeClient (or creates one).
+    For OpenAI-compatible providers, returns a cached OpenAICompatibleClient.
+    """
+    provider = get_provider_for_model(model_id)
+
+    if provider == "anthropic":
+        if anthropic_client is not None:
+            return anthropic_client
+        # Fall back to creating one from env
+        if "anthropic" not in _provider_clients:
+            _provider_clients["anthropic"] = ClaudeClient()
+        return _provider_clients["anthropic"]
+
+    # OpenAI-compatible provider — cache by provider name
+    if provider in _provider_clients:
+        return _provider_clients[provider]
+
+    from claude_wrapper.providers import OpenAICompatibleClient
+
+    config = PROVIDERS.get(provider)
+    if not config:
+        raise ValueError(f"Unknown provider: {provider}")
+
+    api_key = os.environ.get(config["env_key"], "")
+    if not api_key:
+        raise ValueError(f"No API key configured for provider '{provider}' (set {config['env_key']})")
+
+    client = OpenAICompatibleClient(
+        api_key=api_key,
+        base_url=config["base_url"],
+        default_model=get_api_model_id(model_id),
+    )
+    _provider_clients[provider] = client
+    return client
 
 
 class ClaudeClient:

@@ -170,7 +170,7 @@ const chatCore = createChatCore({
 // Prompts
 // ---------------------------------------------------------------------------
 async function loadPrompts() {
-    savedPrompts = await api("/prompts");
+    savedPrompts = await api("/prompts?category=chat");
 }
 
 function populatePromptSelect(selectedId) {
@@ -797,6 +797,13 @@ document.addEventListener("keydown", (e) => {
     messageInput.focus({ preventScroll: true });
 });
 
+// Board input auto-resize — matches chat textarea behavior
+function autoResizeBoardInput() {
+    boardInput.style.height = "auto";
+    boardInput.style.height = Math.min(boardInput.scrollHeight, 200) + "px";
+}
+boardInput.addEventListener("input", autoResizeBoardInput);
+
 // Board text input — extract #tags before pinning
 document.getElementById("board-input-btn").onclick = () => {
     const val = boardInput.value.trim();
@@ -809,10 +816,11 @@ document.getElementById("board-input-btn").onclick = () => {
         extractedTags.push(match[1].toLowerCase());
     }
     const text = val.replace(/#[a-zA-Z0-9-]+/g, "").trim();
-    if (!text) { boardInput.value = ""; return; }
+    if (!text) { boardInput.value = ""; autoResizeBoardInput(); return; }
     const type = /^https?:\/\/\S+$/.test(text) ? "link" : "text";
     createPin(type, text, { tags: extractedTags });
     boardInput.value = "";
+    autoResizeBoardInput();
 };
 boardInput.addEventListener("keydown", (e) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -902,9 +910,17 @@ loadPrompts();
 loadAllTags();
 loadBoard();
 loadConversations().then(() => {
-    const openId = new URLSearchParams(window.location.search).get("c");
+    const params = new URLSearchParams(window.location.search);
+    const openId = params.get("c");
+    const autoInit = params.get("init") === "1";
     if (openId) {
         history.replaceState(null, "", "/");
-        openConversation(openId);
+        openConversation(openId).then(() => {
+            // Model speaks first — send init action after WS connects
+            if (autoInit) {
+                chatCore.setStreaming(true);
+                chatCore.sendRaw({ action: "init", model: "claude-opus-4-6" });
+            }
+        });
     }
 });

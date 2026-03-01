@@ -1,4 +1,12 @@
-"""Conversation manager — orchestrates chat turns, tool execution, and persistence."""
+"""Conversation manager — orchestrates chat turns, tool execution, and persistence.
+
+Routes between Anthropic and OpenAI-compatible providers based on the
+conversation's model. Tool use is only supported for Anthropic models;
+non-Anthropic models get tools=None. Title generation always uses Anthropic
+Haiku (cheap, always available).
+
+Used by: server.py (creates the singleton ConversationManager at startup)
+"""
 
 from __future__ import annotations
 
@@ -6,7 +14,7 @@ import json
 from collections.abc import AsyncGenerator
 from typing import Any
 
-from claude_wrapper.client import ClaudeClient
+from claude_wrapper.client import ClaudeClient, get_client_for_model
 from claude_wrapper.db import Database
 from claude_wrapper.models import (
     MODEL_PRICING,
@@ -15,6 +23,8 @@ from claude_wrapper.models import (
     Message,
     StreamEvent,
     StreamEventType,
+    get_provider_for_model,
+    get_api_model_id,
 )
 from claude_wrapper.tools import ToolRegistry
 
@@ -35,6 +45,19 @@ class ConversationManager:
         self.db = db or Database()
         self.file_db = file_db
         self.pin_db = pin_db
+
+    def _get_client_and_tools(self, model: str):
+        """Return (client, tool_defs, is_anthropic) for the given model.
+
+        Non-Anthropic providers don't support Anthropic-format tool use,
+        so tools are set to None for them. Web search and prompt caching
+        are also Anthropic-only features.
+        """
+        provider = get_provider_for_model(model)
+        is_anthropic = provider == "anthropic"
+        client = get_client_for_model(model, self.client)
+        tool_defs = (self.tools.get_definitions() or None) if is_anthropic else None
+        return client, tool_defs, is_anthropic
 
     # ------------------------------------------------------------------
     # Conversation CRUD
@@ -88,17 +111,18 @@ class ConversationManager:
         conv.messages.append(user_msg)
         self.db.save_message(conversation_id, user_msg)
 
-        tool_defs = self.tools.get_definitions() or None
+        client, tool_defs, is_anthropic = self._get_client_and_tools(conv.model)
         api_messages = self._to_api_messages(conv.messages)
         effective_system = self._get_effective_system_prompt(conv)
 
         for _ in range(10):
-            assistant_msg = self.client.send(
+            assistant_msg = client.send(
                 messages=api_messages,
                 tools=tool_defs,
-                model=conv.model,
+                model=get_api_model_id(conv.model),
                 system=effective_system,
-                thinking_budget=thinking_budget,
+                thinking_budget=thinking_budget if is_anthropic else None,
+                web_search=is_anthropic,
             )
             assistant_msg.parent_id = conv.messages[-1].id
             conv.messages.append(assistant_msg)
@@ -144,7 +168,7 @@ class ConversationManager:
         conv.messages.append(user_msg)
         self.db.save_message(conversation_id, user_msg)
 
-        tool_defs = self.tools.get_definitions() or None
+        client, tool_defs, is_anthropic = self._get_client_and_tools(conv.model)
         effective_system = self._get_effective_system_prompt(conv)
 
         for _ in range(10):
@@ -159,12 +183,13 @@ class ConversationManager:
             cache_creation_tokens: int = 0
             cache_read_tokens: int = 0
 
-            async for event in self.client.stream(
+            async for event in client.stream(
                 messages=api_messages,
                 tools=tool_defs,
-                model=conv.model,
+                model=get_api_model_id(conv.model),
                 system=effective_system,
-                thinking_budget=thinking_budget,
+                thinking_budget=thinking_budget if is_anthropic else None,
+                web_search=is_anthropic,
             ):
                 # Don't forward MESSAGE_DONE from inner stream — we emit our own
                 if event.type == StreamEventType.MESSAGE_DONE:
@@ -285,6 +310,103 @@ class ConversationManager:
         yield StreamEvent(type=StreamEventType.MESSAGE_DONE)
 
     # ------------------------------------------------------------------
+    # Model speaks first (no user message)
+    # ------------------------------------------------------------------
+
+    async def stream_init(
+        self,
+        conversation_id: str,
+        model: str = "claude-opus-4-6",
+    ) -> AsyncGenerator[StreamEvent, None]:
+        """Generate an initial assistant message with no user input.
+
+        Used for "model speaks first" flows like brain dump — the model
+        reads the system prompt and starts the conversation. Always uses
+        the specified model with no thinking budget.
+        """
+        conv = self.db.load_conversation(conversation_id)
+        if conv is None:
+            yield StreamEvent(type=StreamEventType.ERROR, error="Conversation not found")
+            return
+        if conv.messages:
+            yield StreamEvent(type=StreamEventType.ERROR, error="Conversation already has messages")
+            return
+
+        effective_system = self._get_effective_system_prompt(conv)
+
+        # Single user message to prime the model — invisible to the user
+        api_messages = [{"role": "user", "content": "Go ahead."}]
+
+        client, tool_defs, is_anthropic = self._get_client_and_tools(model)
+        collected_blocks: list[ContentBlock] = []
+        text_parts: list[str] = []
+        message_input_tokens = 0
+        message_output_tokens = 0
+        cache_creation_tokens = 0
+        cache_read_tokens = 0
+
+        async for event in client.stream(
+            messages=api_messages,
+            tools=tool_defs,
+            model=get_api_model_id(model),
+            system=effective_system,
+            web_search=is_anthropic,
+        ):
+            if event.type == StreamEventType.MESSAGE_DONE:
+                continue
+            yield event
+
+            if event.type == StreamEventType.TEXT_DELTA and event.text:
+                text_parts.append(event.text)
+            elif event.type == StreamEventType.USAGE:
+                if event.input_tokens:
+                    message_input_tokens = event.input_tokens
+                if event.output_tokens:
+                    message_output_tokens = event.output_tokens
+                if event.cache_creation_input_tokens:
+                    cache_creation_tokens = event.cache_creation_input_tokens
+                if event.cache_read_input_tokens:
+                    cache_read_tokens = event.cache_read_input_tokens
+
+        if text_parts:
+            collected_blocks.append(ContentBlock(type="text", text="".join(text_parts)))
+
+        pricing = MODEL_PRICING.get(model, (5.0, 25.0))
+        input_price, output_price = pricing
+        cost = (
+            message_input_tokens * input_price
+            + message_output_tokens * output_price
+            + cache_creation_tokens * (input_price * 1.25)
+            + cache_read_tokens * (input_price * 0.1)
+        ) / 1_000_000
+
+        if collected_blocks:
+            assistant_msg = Message(
+                role="assistant",
+                content=collected_blocks,
+                parent_id=None,
+            )
+            conv.messages.append(assistant_msg)
+            self.db.save_message(
+                conversation_id, assistant_msg,
+                input_tokens=message_input_tokens,
+                output_tokens=message_output_tokens,
+                cost=cost,
+                cache_creation_input_tokens=cache_creation_tokens,
+                cache_read_input_tokens=cache_read_tokens,
+            )
+
+        conv_cost = self.db.get_conversation_cost(conversation_id)
+        yield StreamEvent(
+            type=StreamEventType.USAGE,
+            input_tokens=conv_cost["input_tokens"],
+            output_tokens=conv_cost["output_tokens"],
+            cache_creation_input_tokens=conv_cost["cache_creation_tokens"],
+            cache_read_input_tokens=conv_cost["cache_read_tokens"],
+        )
+        yield StreamEvent(type=StreamEventType.MESSAGE_DONE)
+
+    # ------------------------------------------------------------------
     # Edit message (create a branch)
     # ------------------------------------------------------------------
 
@@ -316,7 +438,7 @@ class ConversationManager:
         # Reload conversation from the new leaf
         conv = self.db.load_conversation(conversation_id)
 
-        tool_defs = self.tools.get_definitions() or None
+        client, tool_defs, is_anthropic = self._get_client_and_tools(conv.model)
         effective_system = self._get_effective_system_prompt(conv)
 
         for _ in range(10):
@@ -331,12 +453,13 @@ class ConversationManager:
             cache_creation_tokens: int = 0
             cache_read_tokens: int = 0
 
-            async for event in self.client.stream(
+            async for event in client.stream(
                 messages=api_messages,
                 tools=tool_defs,
-                model=conv.model,
+                model=get_api_model_id(conv.model),
                 system=effective_system,
-                thinking_budget=thinking_budget,
+                thinking_budget=thinking_budget if is_anthropic else None,
+                web_search=is_anthropic,
             ):
                 # Don't forward MESSAGE_DONE from inner stream — we emit our own
                 if event.type == StreamEventType.MESSAGE_DONE:
@@ -461,12 +584,22 @@ class ConversationManager:
     # ------------------------------------------------------------------
 
     def _get_effective_system_prompt(self, conv: Conversation) -> str:
-        """Build the system prompt from universal_prompt + saved prompt (if selected).
+        """Build the system prompt from universal prompt + saved prompt (if selected).
 
+        The universal prompt can be set two ways:
+        - universal_prompt_id: references a saved chat prompt (preferred)
+        - universal_prompt: legacy raw text fallback
         Falls back to conv.system_prompt for legacy conversations that have
         a baked-in prompt but no prompt_id.
         """
-        universal = self.db.get_setting("universal_prompt") or ""
+        universal = ""
+        universal_id = self.db.get_setting("universal_prompt_id")
+        if universal_id:
+            prompt = self.db.get_prompt(universal_id)
+            if prompt:
+                universal = prompt["content"]
+        if not universal:
+            universal = self.db.get_setting("universal_prompt") or ""
         parts = [universal] if universal else []
         if conv.prompt_id:
             prompt = self.db.get_prompt(conv.prompt_id)

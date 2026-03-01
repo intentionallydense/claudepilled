@@ -23,8 +23,10 @@
             <label class="form-label" for="default-model">default model</label>
             <select id="default-model" class="form-select"></select>
 
-            <label class="form-label" for="default-system-prompt">universal prompt</label>
-            <textarea id="default-system-prompt" class="form-textarea" rows="6" placeholder="always prepended to every conversation..."></textarea>
+            <label class="form-label" for="universal-prompt-select">universal prompt</label>
+            <select id="universal-prompt-select" class="form-select">
+                <option value="">(none)</option>
+            </select>
 
             <div class="form-actions">
                 <button type="submit" class="btn-dark">save</button>
@@ -33,12 +35,35 @@
         </form>
 
         <section class="prompts-section">
-            <h2 class="section-heading">saved prompts</h2>
+            <h2 class="section-heading">chat prompts</h2>
             <div id="prompts-list" class="prompts-list"></div>
             <div class="prompts-add">
                 <input id="new-prompt-name" class="form-input" placeholder="prompt name..." />
                 <textarea id="new-prompt-content" class="form-textarea" rows="3" placeholder="prompt content..."></textarea>
                 <button id="add-prompt-btn" class="btn-dark" type="button">add prompt</button>
+            </div>
+        </section>
+
+        <section class="prompts-section">
+            <h2 class="section-heading">couch prompts</h2>
+            <div id="couch-prompts-list" class="prompts-list"></div>
+            <div class="prompts-add">
+                <input id="new-couch-prompt-name" class="form-input" placeholder="prompt name..." />
+                <textarea id="new-couch-prompt-content" class="form-textarea" rows="3" placeholder="prompt content..."></textarea>
+                <button id="add-couch-prompt-btn" class="btn-dark" type="button">add prompt</button>
+            </div>
+
+            <div class="suffix-section">
+                <h3 class="suffix-heading">seat suffixes</h3>
+                <p class="suffix-hint">appended to each seat's system prompt regardless of which prompt is selected. variables: <code>{self_label}</code>, <code>{other_label}</code>, <code>{seat_number}</code></p>
+                <label class="form-label" for="seat-1-suffix">seat 1 suffix</label>
+                <textarea id="seat-1-suffix" class="form-textarea" rows="3" placeholder="e.g. end your message with [ready] when the thread has run its course..."></textarea>
+                <label class="form-label" for="seat-2-suffix">seat 2 suffix</label>
+                <textarea id="seat-2-suffix" class="form-textarea" rows="3" placeholder="e.g. additional instructions for seat 2..."></textarea>
+                <div class="form-actions">
+                    <button id="save-suffixes-btn" class="btn-dark" type="button">save suffixes</button>
+                    <span id="suffix-save-status" class="save-status"></span>
+                </div>
             </div>
         </section>
     </div>

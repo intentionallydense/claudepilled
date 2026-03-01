@@ -308,11 +308,12 @@ function setupCompleted() {
 function setupBrainDump() {
     document.getElementById("brain-dump-btn").addEventListener("click", async () => {
         // Uses the seeded "Brain dump" prompt via the saved-prompt system
+        // init=1 tells the chat page to trigger model-speaks-first
         const conv = await api("POST", "/api/conversations", {
             title: "Brain dump",
             prompt_id: "brain_dump",
         });
-        window.location.href = `/?c=${conv.id}`;
+        window.location.href = `/?c=${conv.id}&init=1`;
     });
 }
 

@@ -2,10 +2,11 @@
 // DOM elements
 // ---------------------------------------------------------------------------
 const modelSelect = document.getElementById("default-model");
-const systemPrompt = document.getElementById("default-system-prompt");
+const universalPromptSelect = document.getElementById("universal-prompt-select");
 const form = document.getElementById("settings-form");
 const saveStatus = document.getElementById("save-status");
 const promptsList = document.getElementById("prompts-list");
+const couchPromptsList = document.getElementById("couch-prompts-list");
 
 // ---------------------------------------------------------------------------
 // Load models into select
@@ -18,22 +19,54 @@ async function loadModels() {
     emptyOpt.value = "";
     emptyOpt.textContent = "(none)";
     modelSelect.appendChild(emptyOpt);
+    // Group by provider
+    const byProvider = {};
     for (const m of models) {
-        const opt = document.createElement("option");
-        opt.value = m.id;
-        opt.textContent = `${m.name} ($${m.input_cost}/$${m.output_cost})`;
-        modelSelect.appendChild(opt);
+        const p = m.provider || "anthropic";
+        if (!byProvider[p]) byProvider[p] = [];
+        byProvider[p].push(m);
+    }
+    for (const [provider, group] of Object.entries(byProvider)) {
+        const optgroup = document.createElement("optgroup");
+        optgroup.label = provider.charAt(0).toUpperCase() + provider.slice(1);
+        for (const m of group) {
+            const opt = document.createElement("option");
+            opt.value = m.id;
+            opt.textContent = `${m.name} ($${m.input_cost}/$${m.output_cost})`;
+            optgroup.appendChild(opt);
+        }
+        modelSelect.appendChild(optgroup);
     }
 }
 
 // ---------------------------------------------------------------------------
-// Load current settings
+// Populate universal prompt dropdown from saved chat prompts
+// ---------------------------------------------------------------------------
+async function loadUniversalPromptOptions() {
+    const res = await fetch("/api/prompts?category=chat");
+    const prompts = await res.json();
+    // Keep the "(none)" option, clear the rest
+    universalPromptSelect.innerHTML = '<option value="">(none)</option>';
+    for (const p of prompts) {
+        const opt = document.createElement("option");
+        opt.value = p.id;
+        opt.textContent = p.name;
+        universalPromptSelect.appendChild(opt);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Load current settings (includes seat suffixes)
 // ---------------------------------------------------------------------------
 async function loadSettings() {
     const res = await fetch("/api/settings");
     const settings = await res.json();
     if (settings.default_model) modelSelect.value = settings.default_model;
-    if (settings.universal_prompt) systemPrompt.value = settings.universal_prompt;
+    if (settings.universal_prompt_id) universalPromptSelect.value = settings.universal_prompt_id;
+    const suffix1 = document.getElementById("seat-1-suffix");
+    const suffix2 = document.getElementById("seat-2-suffix");
+    if (suffix1 && settings.couch_seat_1_suffix) suffix1.value = settings.couch_seat_1_suffix;
+    if (suffix2 && settings.couch_seat_2_suffix) suffix2.value = settings.couch_seat_2_suffix;
 }
 
 // ---------------------------------------------------------------------------
@@ -46,7 +79,7 @@ async function saveSettings(e) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
             default_model: modelSelect.value,
-            universal_prompt: systemPrompt.value,
+            universal_prompt_id: universalPromptSelect.value,
         }),
     });
     saveStatus.textContent = "saved";
@@ -54,14 +87,12 @@ async function saveSettings(e) {
 }
 
 // ---------------------------------------------------------------------------
-// Prompts library
+// Prompts library — shared renderer for both chat and couch sections
 // ---------------------------------------------------------------------------
-async function loadPrompts() {
-    const res = await fetch("/api/prompts");
-    const prompts = await res.json();
-    promptsList.innerHTML = "";
+function renderPromptList(listEl, prompts, category) {
+    listEl.innerHTML = "";
     if (prompts.length === 0) {
-        promptsList.innerHTML = '<div class="prompts-empty">no saved prompts yet.</div>';
+        listEl.innerHTML = '<div class="prompts-empty">no saved prompts yet.</div>';
         return;
     }
     for (const p of prompts) {
@@ -83,7 +114,7 @@ async function loadPrompts() {
         const editBtn = document.createElement("button");
         editBtn.className = "text-btn";
         editBtn.textContent = "edit";
-        editBtn.onclick = () => startPromptEdit(p.id, p);
+        editBtn.onclick = () => startPromptEdit(listEl, p.id, p, category);
         actions.appendChild(editBtn);
 
         const delBtn = document.createElement("button");
@@ -91,7 +122,7 @@ async function loadPrompts() {
         delBtn.textContent = "delete";
         delBtn.onclick = async () => {
             await fetch(`/api/prompts/${p.id}`, { method: "DELETE" });
-            loadPrompts();
+            loadAllPrompts();
         };
         actions.appendChild(delBtn);
 
@@ -103,12 +134,25 @@ async function loadPrompts() {
         preview.textContent = p.content.substring(0, 120) + (p.content.length > 120 ? "..." : "");
         item.appendChild(preview);
 
-        promptsList.appendChild(item);
+        listEl.appendChild(item);
     }
 }
 
-function startPromptEdit(id, prompt) {
-    const item = promptsList.querySelector(`[data-id="${id}"]`);
+async function loadAllPrompts() {
+    const [chatPrompts, couchPrompts] = await Promise.all([
+        fetch("/api/prompts?category=chat").then(r => r.json()),
+        fetch("/api/prompts?category=couch").then(r => r.json()),
+    ]);
+    renderPromptList(promptsList, chatPrompts, "chat");
+    renderPromptList(couchPromptsList, couchPrompts, "couch");
+    // Keep universal prompt dropdown in sync with chat prompts
+    const currentVal = universalPromptSelect.value;
+    await loadUniversalPromptOptions();
+    universalPromptSelect.value = currentVal;
+}
+
+function startPromptEdit(listEl, id, prompt, category) {
+    const item = listEl.querySelector(`[data-id="${id}"]`);
     if (!item) return;
 
     item.innerHTML = "";
@@ -130,7 +174,7 @@ function startPromptEdit(id, prompt) {
     const cancelBtn = document.createElement("button");
     cancelBtn.className = "text-btn";
     cancelBtn.textContent = "cancel";
-    cancelBtn.onclick = () => loadPrompts();
+    cancelBtn.onclick = () => loadAllPrompts();
     actions.appendChild(cancelBtn);
 
     const saveBtn = document.createElement("button");
@@ -144,7 +188,7 @@ function startPromptEdit(id, prompt) {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ name: newName, content: contentArea.value }),
         });
-        loadPrompts();
+        loadAllPrompts();
     };
     actions.appendChild(saveBtn);
 
@@ -152,9 +196,9 @@ function startPromptEdit(id, prompt) {
     nameInput.focus();
 }
 
-async function addPrompt() {
-    const nameEl = document.getElementById("new-prompt-name");
-    const contentEl = document.getElementById("new-prompt-content");
+async function addPrompt(category) {
+    const nameEl = document.getElementById(category === "couch" ? "new-couch-prompt-name" : "new-prompt-name");
+    const contentEl = document.getElementById(category === "couch" ? "new-couch-prompt-content" : "new-prompt-content");
     const name = nameEl.value.trim();
     const content = contentEl.value;
     if (!name) return;
@@ -162,17 +206,40 @@ async function addPrompt() {
     await fetch("/api/prompts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, content }),
+        body: JSON.stringify({ name, content, category }),
     });
     nameEl.value = "";
     contentEl.value = "";
-    loadPrompts();
+    loadAllPrompts();
+}
+
+// ---------------------------------------------------------------------------
+// Seat suffixes — saved via the settings API
+// ---------------------------------------------------------------------------
+async function saveSuffixes() {
+    const suffix1 = document.getElementById("seat-1-suffix")?.value || "";
+    const suffix2 = document.getElementById("seat-2-suffix")?.value || "";
+    const statusEl = document.getElementById("suffix-save-status");
+    await fetch("/api/settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+            couch_seat_1_suffix: suffix1,
+            couch_seat_2_suffix: suffix2,
+        }),
+    });
+    if (statusEl) {
+        statusEl.textContent = "saved";
+        setTimeout(() => { statusEl.textContent = ""; }, 2000);
+    }
 }
 
 // ---------------------------------------------------------------------------
 // Init
 // ---------------------------------------------------------------------------
 form.addEventListener("submit", saveSettings);
-document.getElementById("add-prompt-btn").onclick = addPrompt;
-loadModels().then(loadSettings);
-loadPrompts();
+document.getElementById("add-prompt-btn").onclick = () => addPrompt("chat");
+document.getElementById("add-couch-prompt-btn").onclick = () => addPrompt("couch");
+document.getElementById("save-suffixes-btn").onclick = saveSuffixes;
+Promise.all([loadModels(), loadUniversalPromptOptions()]).then(loadSettings);
+loadAllPrompts();

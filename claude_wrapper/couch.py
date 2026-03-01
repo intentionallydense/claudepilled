@@ -1,4 +1,12 @@
-"""The Couch — two-model chatroom orchestrator."""
+"""The Couch — two-model chatroom orchestrator.
+
+Manages two-model conversations with role-flipping. Each turn routes
+to the correct provider via get_client_for_model(), enabling cross-provider
+sessions (e.g. Claude vs GPT). Non-Anthropic models get tools=None and
+web_search=False automatically.
+
+Used by: server.py (creates the singleton CouchOrchestrator at startup)
+"""
 
 from __future__ import annotations
 
@@ -8,7 +16,7 @@ import random
 import re
 from collections.abc import AsyncGenerator
 
-from claude_wrapper.client import ClaudeClient
+from claude_wrapper.client import ClaudeClient, get_client_for_model
 from claude_wrapper.db import Database
 from claude_wrapper.models import (
     AVAILABLE_MODELS,
@@ -18,6 +26,7 @@ from claude_wrapper.models import (
     StreamEvent,
     StreamEventType,
     MODEL_PRICING,
+    get_api_model_id,
 )
 
 # ---------------------------------------------------------------------------
@@ -89,9 +98,11 @@ def _get_model_label(model_id: str) -> str:
 class CouchOrchestrator:
     """Manages two-model couch conversations."""
 
-    def __init__(self, client: ClaudeClient, db: Database):
+    def __init__(self, client: ClaudeClient, db: Database, file_db=None, pin_db=None):
         self.client = client
         self.db = db
+        self.file_db = file_db
+        self.pin_db = pin_db
 
     # ------------------------------------------------------------------
     # Session management
@@ -105,7 +116,10 @@ class CouchOrchestrator:
         """Create a new couch session (conversation with type='couch')."""
         model_a_label = _get_model_label(model_a_id)
         model_b_label = _get_model_label(model_b_id)
-        title = f"{model_a_label} & {model_b_label}"
+        # Strip "Claude " prefix from titles to keep sidebar compact
+        short_a = model_a_label.replace("Claude ", "")
+        short_b = model_b_label.replace("Claude ", "")
+        title = f"{short_a} & {short_b}"
         conv = Conversation(
             title=title,
             system_prompt="",
@@ -131,6 +145,63 @@ class CouchOrchestrator:
         return self.db.get_conversation_cost(session_id)
 
     # ------------------------------------------------------------------
+    # Prompt resolution — template variable substitution
+    # ------------------------------------------------------------------
+
+    def _resolve_prompt(
+        self, meta: dict | None, seat: str, self_label: str, other_label: str,
+    ) -> str:
+        """Resolve the system prompt for a seat.
+
+        Priority: prompt_id_{seat} → legacy system_prompt_{seat} → default template.
+        Applies regex-based variable substitution ({self_label}, {other_label},
+        {seat_number}) which is safe for user prompts containing literal braces.
+        """
+        meta = meta or {}
+
+        # 1. Try saved prompt by ID
+        prompt_id = meta.get(f"prompt_id_{seat}")
+        content = None
+        if prompt_id:
+            prompt_row = self.db.get_prompt(prompt_id)
+            if prompt_row:
+                content = prompt_row["content"]
+
+        # 2. Fall back to legacy baked content
+        if content is None:
+            content = meta.get(f"system_prompt_{seat}")
+
+        # 3. Fall back to default template
+        if not content:
+            if seat == "a":
+                content = SYSTEM_PROMPT_A_TEMPLATE
+            else:
+                content = SYSTEM_PROMPT_B_TEMPLATE
+
+        return self._substitute_variables(content, self_label, other_label, seat)
+
+    def _resolve_suffix(
+        self, seat: str, self_label: str, other_label: str,
+    ) -> str:
+        """Resolve per-seat suffix from settings. Returns empty string if unset."""
+        key = f"couch_seat_{'1' if seat == 'a' else '2'}_suffix"
+        raw = self.db.get_setting(key)
+        if not raw:
+            return ""
+        return self._substitute_variables(raw, self_label, other_label, seat)
+
+    @staticmethod
+    def _substitute_variables(
+        text: str, self_label: str, other_label: str, seat: str,
+    ) -> str:
+        """Regex-based variable substitution — safe for user text with literal braces."""
+        seat_number = "1" if seat == "a" else "2"
+        text = re.sub(r"\{self_label\}", self_label, text)
+        text = re.sub(r"\{other_label\}", other_label, text)
+        text = re.sub(r"\{seat_number\}", seat_number, text)
+        return text
+
+    # ------------------------------------------------------------------
     # Core streaming loop
     # ------------------------------------------------------------------
 
@@ -139,34 +210,42 @@ class CouchOrchestrator:
         session_id: str,
         curator_input: str | list[dict],
         input_type: str = "share",
+        pre_formatted: bool = False,
     ) -> AsyncGenerator[StreamEvent, None]:
-        """Run the couch turn loop, yielding events for the WebSocket."""
+        """Run the couch turn loop, yielding events for the WebSocket.
 
-        # Format the curator input — may contain image blocks
-        if isinstance(curator_input, list):
-            # Extract text portion for the label prefix
-            text_parts = [b.get("text", "") for b in curator_input if b.get("type") == "text"]
-            text_str = "".join(text_parts)
-            image_blocks = [b for b in curator_input if b.get("type") == "image"]
-        else:
-            text_str = curator_input
-            image_blocks = []
+        If pre_formatted is True, curator_input is already in its stored
+        format (e.g. from a regenerate) and should be saved as-is without
+        adding label prefixes like [shared: ...].
+        """
 
-        if input_type == "nudge":
-            label_text = f'[nudge: "{text_str}"]'
-        elif input_type == "jumpin":
-            label_text = f"[human]: {text_str}"
+        if pre_formatted:
+            # Content already has label prefix — use directly.
+            # Convert list[dict] back to list[ContentBlock] if needed.
+            if isinstance(curator_input, list):
+                formatted = [ContentBlock(**b) for b in curator_input]
+            else:
+                formatted = curator_input
         else:
+            # Format the curator input — may contain image blocks
+            if isinstance(curator_input, list):
+                text_parts = [b.get("text", "") for b in curator_input if b.get("type") == "text"]
+                text_str = "".join(text_parts)
+                image_blocks = [b for b in curator_input if b.get("type") == "image"]
+            else:
+                text_str = curator_input
+                image_blocks = []
+
+            # Always use "share" format
             label_text = f"[shared: {text_str}]"
 
-        # Build final content — string if no images, ContentBlock list if images present
-        if image_blocks:
-            content_blocks = [ContentBlock(type="text", text=label_text)]
-            for img in image_blocks:
-                content_blocks.append(ContentBlock(**img))
-            formatted = content_blocks
-        else:
-            formatted = label_text
+            if image_blocks:
+                content_blocks = [ContentBlock(type="text", text=label_text)]
+                for img in image_blocks:
+                    content_blocks.append(ContentBlock(**img))
+                formatted = content_blocks
+            else:
+                formatted = label_text
 
         # Load conversation and model config
         conv = self.db.load_conversation(session_id)
@@ -184,13 +263,23 @@ class CouchOrchestrator:
             model_a_id, model_a_label = DEFAULT_MODEL_A_ID, _get_model_label(DEFAULT_MODEL_A_ID)
             model_b_id, model_b_label = DEFAULT_MODEL_B_ID, _get_model_label(DEFAULT_MODEL_B_ID)
 
-        # Use custom prompts from metadata if set, otherwise use templates
-        system_prompt_a = (meta or {}).get("system_prompt_a") or SYSTEM_PROMPT_A_TEMPLATE.format(
-            self_label=model_a_label, other_label=model_b_label,
-        )
-        system_prompt_b = (meta or {}).get("system_prompt_b") or SYSTEM_PROMPT_B_TEMPLATE.format(
-            self_label=model_b_label, other_label=model_a_label,
-        )
+        # Resolve prompts via template system (prompt_id → legacy → default)
+        system_prompt_a = self._resolve_prompt(meta, "a", model_a_label, model_b_label)
+        system_prompt_b = self._resolve_prompt(meta, "b", model_b_label, model_a_label)
+
+        # Append per-seat suffixes from settings
+        suffix_a = self._resolve_suffix("a", model_a_label, model_b_label)
+        suffix_b = self._resolve_suffix("b", model_b_label, model_a_label)
+        if suffix_a:
+            system_prompt_a = system_prompt_a + "\n\n" + suffix_a
+        if suffix_b:
+            system_prompt_b = system_prompt_b + "\n\n" + suffix_b
+
+        # Append injected files/pins context if any are active
+        context_block = self._build_injected_context_block(session_id)
+        if context_block:
+            system_prompt_a = system_prompt_a + "\n\n" + context_block
+            system_prompt_b = system_prompt_b + "\n\n" + context_block
 
         # Save curator message
         parent_id = conv.current_leaf_id
@@ -231,14 +320,15 @@ class CouchOrchestrator:
                 messages, current_model, model_a_label, model_b_label,
             )
 
-            # Stream the response
+            # Stream the response — route to the right provider
             full_text = ""
             turn_input_tokens = 0
             turn_output_tokens = 0
+            turn_client = get_client_for_model(model_id, self.client)
 
-            async for event in self.client.stream(
+            async for event in turn_client.stream(
                 messages=api_messages,
-                model=model_id,
+                model=get_api_model_id(model_id),
                 system=system_prompt,
                 web_search=False,
                 max_tokens=4096,
@@ -325,6 +415,49 @@ class CouchOrchestrator:
             output_tokens=total_cost["output_tokens"],
         )
         yield StreamEvent(type=StreamEventType.MESSAGE_DONE)
+
+    # ------------------------------------------------------------------
+    # Context injection — appends active files/pins to system prompts
+    # ------------------------------------------------------------------
+
+    def _build_injected_context_block(self, session_id: str) -> str:
+        """Build XML block of injected files and tagged pins for system prompts."""
+        parts = []
+
+        if self.file_db:
+            active_file_ids = self.file_db.get_active_file_ids(session_id)
+            files = []
+            for fid in active_file_ids:
+                f = self.file_db.get_file(fid)
+                if f:
+                    files.append(f)
+            if files:
+                files.sort(key=lambda f: f["filename"])
+                parts.append("<injected_files>")
+                for f in files:
+                    tags_str = ", ".join(f["tags"]) if isinstance(f["tags"], list) else f["tags"]
+                    parts.append(f'<file name="{f["filename"]}" tags="{tags_str}" tokens="{f["token_count"]}">')
+                    parts.append(f["content"])
+                    parts.append("</file>")
+                parts.append("</injected_files>")
+
+        if self.pin_db:
+            active_pin_ids = self.pin_db.get_active_pin_ids(session_id)
+            pins = []
+            for pid in active_pin_ids:
+                p = self.pin_db.get(pid)
+                if p and p["type"] != "image":
+                    pins.append(p)
+            if pins:
+                parts.append("<injected_pins>")
+                for p in pins:
+                    tags_str = ", ".join(p["tags"]) if isinstance(p["tags"], list) else str(p["tags"])
+                    parts.append(f'<pin type="{p["type"]}" tags="{tags_str}">')
+                    parts.append(p["content"])
+                    parts.append("</pin>")
+                parts.append("</injected_pins>")
+
+        return "\n".join(parts)
 
     # ------------------------------------------------------------------
     # Message building — role-flipping

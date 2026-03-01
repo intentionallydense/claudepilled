@@ -89,6 +89,12 @@ class Database:
             except sqlite3.OperationalError:
                 pass
 
+        # Prompts migrations
+        try:
+            conn.execute("ALTER TABLE prompts ADD COLUMN category TEXT DEFAULT 'chat'")
+        except sqlite3.OperationalError:
+            pass
+
         msg_migrations = [
             ("input_tokens", "INTEGER", "0"),
             ("output_tokens", "INTEGER", "0"),
@@ -329,6 +335,17 @@ class Database:
             "cache_read_tokens": row["total_cache_read_tokens"] if "total_cache_read_tokens" in keys else 0,
         }
 
+    def get_message(self, message_id: str) -> Message | None:
+        """Load a single message by ID."""
+        conn = self._connect()
+        row = conn.execute(
+            "SELECT * FROM messages WHERE id = ?", (message_id,)
+        ).fetchone()
+        conn.close()
+        if not row:
+            return None
+        return self._row_to_message(row)
+
     def set_current_leaf(self, conversation_id: str, leaf_id: str) -> None:
         conn = self._connect()
         now = datetime.now(timezone.utc).isoformat()
@@ -540,33 +557,39 @@ class Database:
     # Prompts library
     # ------------------------------------------------------------------
 
-    def list_prompts(self) -> list[dict]:
+    def list_prompts(self, category: str | None = None) -> list[dict]:
         conn = self._connect()
-        rows = conn.execute(
-            "SELECT id, name, content, created_at FROM prompts ORDER BY name"
-        ).fetchall()
+        if category:
+            rows = conn.execute(
+                "SELECT id, name, content, category, created_at FROM prompts WHERE category = ? ORDER BY name",
+                (category,),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT id, name, content, category, created_at FROM prompts ORDER BY name"
+            ).fetchall()
         conn.close()
         return [dict(row) for row in rows]
 
     def get_prompt(self, prompt_id: str) -> dict | None:
         conn = self._connect()
         row = conn.execute(
-            "SELECT id, name, content, created_at FROM prompts WHERE id = ?",
+            "SELECT id, name, content, category, created_at FROM prompts WHERE id = ?",
             (prompt_id,),
         ).fetchone()
         conn.close()
         return dict(row) if row else None
 
-    def save_prompt(self, prompt_id: str, name: str, content: str) -> dict:
+    def save_prompt(self, prompt_id: str, name: str, content: str, category: str = "chat") -> dict:
         conn = self._connect()
         now = datetime.now(timezone.utc).isoformat()
         conn.execute(
-            "INSERT OR REPLACE INTO prompts (id, name, content, created_at) VALUES (?, ?, ?, ?)",
-            (prompt_id, name, content, now),
+            "INSERT OR REPLACE INTO prompts (id, name, content, category, created_at) VALUES (?, ?, ?, ?, ?)",
+            (prompt_id, name, content, category, now),
         )
         conn.commit()
         conn.close()
-        return {"id": prompt_id, "name": name, "content": content, "created_at": now}
+        return {"id": prompt_id, "name": name, "content": content, "category": category, "created_at": now}
 
     def delete_prompt(self, prompt_id: str) -> None:
         conn = self._connect()

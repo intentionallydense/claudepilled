@@ -9,6 +9,7 @@ description = "A wrapper around the Anthropic Claude API with tool use, conversa
 requires-python = ">=3.10"
 dependencies = [
     "anthropic>=0.40.0",
+    "openai>=1.30.0",
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.32.0",
     "python-dotenv>=1.0.0",
