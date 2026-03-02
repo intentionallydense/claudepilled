@@ -132,6 +132,9 @@ body {
     font-family: inherit;
     font-size: 0.8rem;
     cursor: pointer;
+    min-width: 0;
+    max-width: 200px;
+    text-overflow: ellipsis;
 }
 .select-minimal:focus { outline: none; border-color: #111; }
 
@@ -526,6 +529,7 @@ body {
     align-items: center;
     gap: 0.5rem;
     margin-top: 0.5rem;
+    overflow: hidden;
 }
 .input-actions-spacer { flex: 1; }
 
@@ -542,6 +546,7 @@ body {
     font-family: inherit;
     font-size: 0.85rem;
     cursor: pointer;
+    flex-shrink: 0;
 }
 .send-btn:hover { background: #333; }
 .send-btn:disabled { background: #ccc; cursor: not-allowed; }
@@ -554,6 +559,7 @@ body {
     font-family: inherit;
     font-size: 0.85rem;
     cursor: pointer;
+    flex-shrink: 0;
 }
 .stop-btn:hover { background: #fef2f2; }
 
@@ -1201,4 +1207,85 @@ body {
 }
 .image-preview .remove-btn:hover {
     background: #c00;
+}
+
+/* ------------------------------------------------------------------ */
+/* Hamburger menu button + sidebar backdrop (hidden on desktop)        */
+/* ------------------------------------------------------------------ */
+.menu-btn {
+    display: none;
+    position: fixed;
+    top: 0.75rem;
+    left: 0.75rem;
+    z-index: 201;
+    background: #fff;
+    border: 1px solid #ddd;
+    font-size: 1.25rem;
+    padding: 0.25rem 0.5rem;
+    cursor: pointer;
+    font-family: inherit;
+    color: #111;
+    line-height: 1;
+}
+.menu-btn:hover { border-color: #111; }
+
+.sidebar-backdrop {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.3);
+    z-index: 99;
+}
+.sidebar-backdrop.open { display: block; }
+
+/* ------------------------------------------------------------------ */
+/* Mobile layout (max-width: 768px)                                    */
+/* ------------------------------------------------------------------ */
+@media (max-width: 768px) {
+    body { font-size: 16px; }
+
+    #app {
+        grid-template-columns: 1fr;
+    }
+
+    .menu-btn { display: block; }
+
+    /* Hide tree and board panels on mobile */
+    .tree-panel,
+    .board-panel { display: none !important; }
+
+    /* Sidebar: hidden by default, fixed overlay when open */
+    #sidebar {
+        display: none;
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 260px;
+        height: 100vh;
+        z-index: 100;
+        background: #fff;
+        box-shadow: 2px 0 8px rgba(0,0,0,0.15);
+    }
+    #sidebar.open { display: flex; }
+
+    /* Messages: full width with top padding for hamburger */
+    .messages {
+        padding: 3rem 1rem 1rem;
+    }
+
+    /* Prevent iOS zoom on input focus */
+    #message-input { font-size: 16px; }
+
+    /* Wrap action buttons on small screens */
+    .input-actions { flex-wrap: wrap; }
+
+    /* Always show action buttons on touch (no hover) */
+    .edit-btn,
+    .msg-action-btn {
+        opacity: 1;
+    }
+
+    #conversation-list li .delete-btn {
+        opacity: 1;
+    }
 }

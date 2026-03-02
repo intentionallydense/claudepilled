@@ -121,7 +121,7 @@ class ConversationManager:
                 tools=tool_defs,
                 model=get_api_model_id(conv.model),
                 system=effective_system,
-                thinking_budget=thinking_budget if is_anthropic else None,
+                thinking_budget=thinking_budget,
                 web_search=is_anthropic,
             )
             assistant_msg.parent_id = conv.messages[-1].id
@@ -188,7 +188,7 @@ class ConversationManager:
                 tools=tool_defs,
                 model=get_api_model_id(conv.model),
                 system=effective_system,
-                thinking_budget=thinking_budget if is_anthropic else None,
+                thinking_budget=thinking_budget,
                 web_search=is_anthropic,
             ):
                 # Don't forward MESSAGE_DONE from inner stream — we emit our own
@@ -316,7 +316,7 @@ class ConversationManager:
     async def stream_init(
         self,
         conversation_id: str,
-        model: str = "claude-opus-4-6",
+        model: str = "claude-haiku-4-5-20251001",
     ) -> AsyncGenerator[StreamEvent, None]:
         """Generate an initial assistant message with no user input.
 
@@ -458,7 +458,7 @@ class ConversationManager:
                 tools=tool_defs,
                 model=get_api_model_id(conv.model),
                 system=effective_system,
-                thinking_budget=thinking_budget if is_anthropic else None,
+                thinking_budget=thinking_budget,
                 web_search=is_anthropic,
             ):
                 # Don't forward MESSAGE_DONE from inner stream — we emit our own

@@ -241,5 +241,4 @@ form.addEventListener("submit", saveSettings);
 document.getElementById("add-prompt-btn").onclick = () => addPrompt("chat");
 document.getElementById("add-couch-prompt-btn").onclick = () => addPrompt("couch");
 document.getElementById("save-suffixes-btn").onclick = saveSuffixes;
-Promise.all([loadModels(), loadUniversalPromptOptions()]).then(loadSettings);
-loadAllPrompts();
+Promise.all([loadModels(), loadUniversalPromptOptions(), loadAllPrompts()]).then(loadSettings);

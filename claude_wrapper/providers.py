@@ -62,7 +62,7 @@ class OpenAICompatibleClient:
     ) -> AsyncGenerator[StreamEvent, None]:
         """Stream a response, yielding StreamEvents. Retries on overloaded/5xx."""
         api_messages = self._build_messages(messages, system)
-        kwargs = self._build_kwargs(api_messages, model, max_tokens)
+        kwargs = self._build_kwargs(api_messages, model, max_tokens, thinking_budget)
 
         last_exc = None
         for attempt in range(max_retries):
@@ -88,7 +88,13 @@ class OpenAICompatibleClient:
     async def _stream_once(
         self, kwargs: dict[str, Any]
     ) -> AsyncGenerator[StreamEvent, None]:
-        """Single streaming attempt — translates OpenAI chunks to StreamEvents."""
+        """Single streaming attempt — translates OpenAI chunks to StreamEvents.
+
+        Handles two reasoning formats:
+        - OpenRouter: delta.reasoning_details array with {type: "reasoning.text", text: "..."}
+        - DeepSeek native: delta.reasoning_content string
+        Both map to THINKING_DELTA/THINKING_DONE StreamEvents.
+        """
         stream = await self._client.chat.completions.create(**kwargs, stream=True)
 
         # Track state across chunks
@@ -115,8 +121,40 @@ class OpenAICompatibleClient:
             if delta is None:
                 continue
 
-            # DeepSeek R1 reasoning_content → THINKING_DELTA
+            # --- Reasoning extraction (two formats) ---
+
+            # Format 1: OpenRouter reasoning_details array
+            # Each item is {type: "reasoning.text", text: "..."} or metadata-only.
+            # The SDK may expose it as a direct attribute or in model_extra.
+            reasoning_details = getattr(delta, "reasoning_details", None)
+            if reasoning_details is None:
+                # Fallback: check model_extra for unrecognized fields
+                extra = getattr(delta, "model_extra", None) or {}
+                reasoning_details = extra.get("reasoning_details")
+            if reasoning_details and isinstance(reasoning_details, list):
+                for detail in reasoning_details:
+                    if not isinstance(detail, dict):
+                        # Pydantic model — convert to dict
+                        if hasattr(detail, "model_dump"):
+                            detail = detail.model_dump()
+                        else:
+                            detail = getattr(detail, "__dict__", {}) or {}
+                    detail_type = detail.get("type", "")
+                    text = detail.get("text")
+                    if detail_type == "reasoning.text" and text:
+                        if not in_reasoning:
+                            in_reasoning = True
+                        reasoning_parts.append(text)
+                        yield StreamEvent(
+                            type=StreamEventType.THINKING_DELTA,
+                            thinking=text,
+                        )
+
+            # Format 2: DeepSeek native reasoning_content string
             reasoning = getattr(delta, "reasoning_content", None)
+            if reasoning is None:
+                extra = getattr(delta, "model_extra", None) or {}
+                reasoning = extra.get("reasoning_content")
             if reasoning:
                 if not in_reasoning:
                     in_reasoning = True
@@ -180,22 +218,54 @@ class OpenAICompatibleClient:
     ) -> Message:
         """Non-streaming send — returns a complete Message."""
         api_messages = self._build_messages(messages, system)
-        kwargs = self._build_kwargs(api_messages, model, max_tokens)
+        kwargs = self._build_kwargs(api_messages, model, max_tokens, thinking_budget)
 
         response = await self._client.chat.completions.create(**kwargs)
         choice = response.choices[0]
 
         blocks: list[ContentBlock] = []
 
-        # Check for reasoning content (DeepSeek R1)
-        reasoning = getattr(choice.message, "reasoning_content", None)
-        if reasoning:
-            blocks.append(ContentBlock(type="thinking", thinking=reasoning))
+        # Check for reasoning — OpenRouter uses reasoning/reasoning_details,
+        # DeepSeek native uses reasoning_content
+        reasoning_text = self._extract_reasoning(choice.message)
+        if reasoning_text:
+            blocks.append(ContentBlock(type="thinking", thinking=reasoning_text))
 
         if choice.message.content:
             blocks.append(ContentBlock(type="text", text=choice.message.content))
 
         return Message(role="assistant", content=blocks if blocks else "")
+
+    @staticmethod
+    def _extract_reasoning(message) -> str | None:
+        """Extract reasoning text from a response message.
+
+        Handles both OpenRouter (reasoning / reasoning_details) and
+        DeepSeek native (reasoning_content) formats.
+        """
+        # OpenRouter: message.reasoning (plain string)
+        reasoning = getattr(message, "reasoning", None)
+        if reasoning and isinstance(reasoning, str):
+            return reasoning
+
+        # OpenRouter: message.reasoning_details (structured array)
+        details = getattr(message, "reasoning_details", None)
+        if details and isinstance(details, list):
+            parts = []
+            for detail in details:
+                if not isinstance(detail, dict):
+                    detail = getattr(detail, "__dict__", {}) or {}
+                if detail.get("type") == "reasoning.text" and detail.get("text"):
+                    parts.append(detail["text"])
+            if parts:
+                return "".join(parts)
+
+        # DeepSeek native: message.reasoning_content
+        rc = getattr(message, "reasoning_content", None)
+        if rc and isinstance(rc, str):
+            return rc
+
+        return None
 
     # ------------------------------------------------------------------
     # Internals
@@ -276,13 +346,32 @@ class OpenAICompatibleClient:
         messages: list[dict[str, Any]],
         model: str | None,
         max_tokens: int | None,
+        thinking_budget: int | None = None,
     ) -> dict[str, Any]:
-        """Build kwargs for the OpenAI API call."""
+        """Build kwargs for the OpenAI API call.
+
+        When thinking_budget is set, adds OpenRouter's `reasoning` parameter
+        to request thinking traces. Also works with DeepSeek native API
+        (which ignores unrecognized params). For providers that don't support
+        reasoning, the extra param is harmlessly ignored.
+        """
+        effective_max = max_tokens or self.max_tokens
         kwargs: dict[str, Any] = {
             "model": model or self.default_model,
             "messages": messages,
-            "max_tokens": max_tokens or self.max_tokens,
+            "max_tokens": effective_max,
             # Request usage in streaming responses (supported by most providers)
             "stream_options": {"include_usage": True},
         }
+
+        # Add reasoning request when thinking is enabled.
+        # Sent via extra_body since `reasoning` isn't a standard OpenAI SDK param.
+        # OpenRouter maps this to provider-specific reasoning controls.
+        # Providers that don't support it ignore the extra field.
+        if thinking_budget and thinking_budget > 0:
+            kwargs["extra_body"] = {"reasoning": {"max_tokens": thinking_budget}}
+            # Ensure max_tokens is large enough for reasoning + response
+            if effective_max <= thinking_budget:
+                kwargs["max_tokens"] = thinking_budget + 4096
+
         return kwargs

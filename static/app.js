@@ -31,6 +31,9 @@ const contextBarFiles = document.getElementById("context-bar-files");
 const contextTokenCount = document.getElementById("context-token-count");
 const tagAutocomplete = document.getElementById("tag-autocomplete");
 const newChatBtn = document.getElementById("new-chat-btn");
+const menuBtn = document.getElementById("menu-btn");
+const sidebarBackdrop = document.getElementById("sidebar-backdrop");
+const sidebar = document.getElementById("sidebar");
 
 // DOM elements — chat (passed to chatCore)
 const messagesEl = document.getElementById("messages");
@@ -222,7 +225,7 @@ async function loadConversations() {
         };
         li.appendChild(del);
 
-        li.onclick = () => openConversation(c.id);
+        li.onclick = () => { openConversation(c.id); toggleSidebar(false); };
         conversationList.appendChild(li);
     }
 }
@@ -398,7 +401,7 @@ function renderContextBar() {
         const removeBtn = document.createElement("button");
         removeBtn.className = "context-remove-btn";
         removeBtn.textContent = "\u00d7";
-        removeBtn.onmousedown = async (e) => {
+        removeBtn.onpointerdown = async (e) => {
             e.preventDefault();
             await api(`/conversations/${chatCore.getConversationId()}/context/${f.id}`, { method: "DELETE" });
             await loadContext();
@@ -427,7 +430,7 @@ function renderContextBar() {
         const removeBtn = document.createElement("button");
         removeBtn.className = "context-remove-btn";
         removeBtn.textContent = "\u00d7";
-        removeBtn.onmousedown = async (e) => {
+        removeBtn.onpointerdown = async (e) => {
             e.preventDefault();
             await api(`/conversations/${chatCore.getConversationId()}/context/pin/${p.id}`, { method: "DELETE" });
             await loadContext();
@@ -473,7 +476,7 @@ function handleTagAutocomplete() {
         const item = document.createElement("div");
         item.className = "autocomplete-item";
         item.innerHTML = `<span class="tag-prefix">#</span>${escapeHtml(tag)}`;
-        item.onmousedown = (e) => {
+        item.onpointerdown = (e) => {
             e.preventDefault();
             const beforeTag = before.slice(0, before.length - match[0].length);
             const after = text.slice(cursorPos);
@@ -766,6 +769,18 @@ async function createPin(type, content, opts = {}) {
 }
 
 // ---------------------------------------------------------------------------
+// Mobile sidebar toggle
+// ---------------------------------------------------------------------------
+function toggleSidebar(open) {
+    const show = open !== undefined ? open : !sidebar.classList.contains("open");
+    sidebar.classList.toggle("open", show);
+    sidebarBackdrop.classList.toggle("open", show);
+}
+
+if (menuBtn) menuBtn.onclick = () => toggleSidebar();
+if (sidebarBackdrop) sidebarBackdrop.onclick = () => toggleSidebar(false);
+
+// ---------------------------------------------------------------------------
 // Event listeners (page-specific)
 // ---------------------------------------------------------------------------
 newChatBtn.onclick = quickCreateConversation;
@@ -919,7 +934,7 @@ loadConversations().then(() => {
             // Model speaks first — send init action after WS connects
             if (autoInit) {
                 chatCore.setStreaming(true);
-                chatCore.sendRaw({ action: "init", model: "claude-opus-4-6" });
+                chatCore.sendRaw({ action: "init", model: "claude-haiku-4-5-20251001" });
             }
         });
     }

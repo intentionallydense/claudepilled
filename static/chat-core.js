@@ -772,7 +772,9 @@ function createChatCore(config) {
 
         const label = document.createElement("div");
         label.className = "role-label";
-        label.textContent = role === "user" ? "you" : "claude";
+        label.textContent = role === "user" ? "you"
+            : (availableModels.find(m => m.id === el.modelSelect?.value)?.name
+               || el.modelSelect?.value || "assistant");
         div.appendChild(label);
 
         const text = document.createElement("div");
