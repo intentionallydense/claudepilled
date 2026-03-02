@@ -155,3 +155,12 @@
     display: flex;
     gap: 0.5rem;
 }
+
+/* Model attribution badge */
+.briefing-model-badge {
+    font-size: 0.75rem;
+    color: #888;
+    text-align: right;
+    padding: 4px 0 8px;
+    font-style: italic;
+}

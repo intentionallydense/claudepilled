@@ -291,18 +291,14 @@ class TaskDatabase:
 
     def _create_recurrence(self, completed_task: dict) -> None:
         """Create the next instance of a recurring task."""
-        from datetime import timedelta
-
         from claude_wrapper.task_urgency import parse_date
 
         rule = completed_task["recurrence"].lower().strip()
         due = parse_date(completed_task["due"])
 
-        delta = _parse_recurrence(rule)
-        if delta is None:
+        new_due = _next_recurrence_date(rule, due)
+        if new_due is None:
             return
-
-        new_due = due + delta
         self.create(
             title=completed_task["title"],
             description=completed_task["description"],
@@ -326,18 +322,66 @@ class TaskDatabase:
         return task
 
 
-def _parse_recurrence(rule: str):
-    """Parse simple recurrence rules into timedelta. Returns None if unparseable."""
+def _next_recurrence_date(rule: str, from_date):
+    """Compute the next due date given a recurrence rule and a starting date.
+
+    Supported rules:
+    - "daily", "weekly", "biweekly", "monthly"
+    - "every N days", "every N weeks", "every N months"
+    - "weekdays:mon,wed,fri" -- next matching weekday after from_date
+    """
+    import re
     from datetime import timedelta
 
-    mapping = {"daily": 1, "weekly": 7, "monthly": 30}
-    if rule in mapping:
-        return timedelta(days=mapping[rule])
+    rule = rule.lower().strip()
 
-    # "every N days" pattern
-    import re
-    match = re.match(r"every\s+(\d+)\s+days?", rule)
-    if match:
-        return timedelta(days=int(match.group(1)))
+    # Simple aliases
+    if rule == "daily":
+        return from_date + timedelta(days=1)
+    if rule == "weekly":
+        return from_date + timedelta(weeks=1)
+    if rule == "biweekly":
+        return from_date + timedelta(weeks=2)
+    if rule == "monthly":
+        return _add_months(from_date, 1)
+
+    # "every N days/weeks/months"
+    m = re.match(r"every\s+(\d+)\s+(days?|weeks?|months?)", rule)
+    if m:
+        n = int(m.group(1))
+        unit = m.group(2).rstrip("s")
+        if unit == "day":
+            return from_date + timedelta(days=n)
+        if unit == "week":
+            return from_date + timedelta(weeks=n)
+        if unit == "month":
+            return _add_months(from_date, n)
+
+    # "weekdays:mon,tue,thu" -- find the next matching day of week
+    m = re.match(r"weekdays:(.+)", rule)
+    if m:
+        day_names = {"mon": 0, "tue": 1, "wed": 2, "thu": 3, "fri": 4, "sat": 5, "sun": 6}
+        target_days = set()
+        for d in m.group(1).split(","):
+            d = d.strip()
+            if d in day_names:
+                target_days.add(day_names[d])
+        if not target_days:
+            return None
+        # Search up to 7 days forward for the next matching weekday
+        for offset in range(1, 8):
+            candidate = from_date + timedelta(days=offset)
+            if candidate.weekday() in target_days:
+                return candidate
 
     return None
+
+
+def _add_months(dt, months: int):
+    """Add N months to a date, clamping to month end if needed."""
+    import calendar
+    month = dt.month - 1 + months
+    year = dt.year + month // 12
+    month = month % 12 + 1
+    day = min(dt.day, calendar.monthrange(year, month)[1])
+    return dt.replace(year=year, month=month, day=day)

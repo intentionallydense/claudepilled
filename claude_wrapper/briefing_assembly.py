@@ -110,6 +110,7 @@ def assemble_briefing(
 
     # Try GLM5 via OpenRouter (thinking enabled by default for richer output)
     assembled_text = _call_glm5(system_msg, user_content)
+    used_model = "GLM-5" if assembled_text is not None else None
 
     # Fall back to Anthropic Haiku if OpenRouter isn't available
     if assembled_text is None:
@@ -125,8 +126,9 @@ def assemble_briefing(
         for block in response.content:
             if block.type == "text" and block.text:
                 assembled_text += block.text
+        used_model = "Haiku 4.5"
 
-    return briefing_db.save_briefing(today, sections, assembled_text)
+    return briefing_db.save_briefing(today, sections, assembled_text, model=used_model)
 
 
 def _call_glm5(system_msg: str, user_content: str) -> str | None:

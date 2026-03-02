@@ -80,21 +80,7 @@ async function loadFilters() {
         tagSelect.appendChild(opt);
     });
 
-    // Rebuild add-form project dropdown
-    const newProjectSel = document.getElementById("new-project");
-    if (newProjectSel) {
-        newProjectSel.innerHTML = '<option value="">project</option>';
-        projects.forEach(p => {
-            const opt = document.createElement("option");
-            opt.value = p;
-            opt.textContent = p;
-            newProjectSel.appendChild(opt);
-        });
-        const newOpt = document.createElement("option");
-        newOpt.value = "__new__";
-        newOpt.textContent = "+ new project";
-        newProjectSel.appendChild(newOpt);
-    }
+
 
 }
 
@@ -156,6 +142,7 @@ function createTaskItem(task, isCompleted = false) {
                     ${task.due ? `<span class="task-due ${dueClass(task.due)}">${formatDue(task.due)}</span>` : ""}
                     ${(task.tags || []).map(t => `<span class="task-tag">#${esc(t)}</span>`).join("")}
                     ${task.status === "active" ? '<span style="color:#e8a838">active</span>' : ""}
+                    ${task.recurrence ? `<span class="task-tag">${esc(task.recurrence)}</span>` : ""}
                 </div>
             </div>
         </div>
@@ -283,18 +270,13 @@ function showEditForm(task, li) {
         return;
     }
 
-    // Build project options
-    let projectOptions = '<option value="">none</option>';
-    knownProjects.forEach(p => {
-        projectOptions += `<option value="${esc(p)}" ${task.project === p ? "selected" : ""}>${esc(p)}</option>`;
-    });
-    if (task.project && !knownProjects.includes(task.project)) {
-        projectOptions += `<option value="${esc(task.project)}" selected>${esc(task.project)}</option>`;
-    }
-    projectOptions += '<option value="__new__">+ new project</option>';
 
     const dueVal = task.due ? toDateValue(task.due) : "";
     const timeVal = task.due ? toTimeValue(task.due) : "";
+
+    // Parse existing recurrence for the picker
+    const recur = task.recurrence || "";
+    const recurType = _parseRecurType(recur);
 
     container.innerHTML = `
         <div class="task-form" style="margin-top:0.5rem;">
@@ -309,15 +291,27 @@ function showEditForm(task, li) {
             </div>
             <textarea class="form-textarea edit-description" rows="2">${esc(task.description || "")}</textarea>
             <div class="form-row">
-                <select class="form-select edit-project">${projectOptions}</select>
-                <input class="form-input edit-project-custom" placeholder="new project name..." style="display:none;" />
-                <div class="tag-picker edit-tag-picker">
-                    <div class="tag-chips edit-tag-chips"></div>
+                <div class="project-picker edit-project-picker">
+                    <input class="form-input form-select-auto project-input edit-project-input" value="${esc(task.project || "")}" placeholder="project..." autocomplete="off" />
+                    <div class="project-dropdown edit-project-dropdown"></div>
+                </div>
+                <div class="tag-picker tag-picker-compact edit-tag-picker">
                     <input class="tag-search-input edit-tag-input" placeholder="tags..." autocomplete="off" />
                     <div class="tag-dropdown edit-tag-dropdown"></div>
                 </div>
-                <input class="form-input edit-due" type="date" value="${dueVal}" />
-                <input class="form-input edit-due-time" type="time" value="${timeVal}" />
+                <input class="form-input form-input-date edit-due" type="date" value="${dueVal}" />
+                <input class="form-input form-input-time edit-due-time" type="time" value="${timeVal}" />
+            </div>
+            <div class="tag-chips-row edit-tag-chips"></div>
+            <div class="form-row recurrence-row">
+                <select class="form-select form-select-auto edit-recur-type">
+                    <option value="">no repeat</option>
+                    <option value="daily" ${recurType.type === "daily" ? "selected" : ""}>every N days</option>
+                    <option value="weekly" ${recurType.type === "weekly" ? "selected" : ""}>every N weeks</option>
+                    <option value="monthly" ${recurType.type === "monthly" ? "selected" : ""}>every N months</option>
+                    <option value="weekdays" ${recurType.type === "weekdays" ? "selected" : ""}>days of week</option>
+                </select>
+                <div class="recur-detail edit-recur-detail"></div>
             </div>
             <div class="form-actions">
                 <button class="btn-dark edit-save-btn">save</button>
@@ -325,9 +319,12 @@ function showEditForm(task, li) {
             </div>
         </div>
     `;
+
+    // Init recurrence detail UI
+    _initRecurDetail(container, recurType);
     container.style.display = "block";
 
-    // Init tag picker for edit form, pre-populated with task's tags
+    // Init tag picker for edit form — chips render in separate row below
     const editTagPicker = createTagPicker(
         container.querySelector(".edit-tag-chips"),
         container.querySelector(".edit-tag-input"),
@@ -335,17 +332,11 @@ function showEditForm(task, li) {
     );
     editTagPicker.setTags(task.tags || []);
 
-    // Show custom project input when "+ new" selected
-    const projSel = container.querySelector(".edit-project");
-    const projCustom = container.querySelector(".edit-project-custom");
-    projSel.addEventListener("change", () => {
-        if (projSel.value === "__new__") {
-            projCustom.style.display = "";
-            projCustom.focus();
-        } else {
-            projCustom.style.display = "none";
-        }
-    });
+    // Init project combo picker for edit form
+    const editProjectPicker = createProjectPicker(
+        container.querySelector(".edit-project-input"),
+        container.querySelector(".edit-project-dropdown"),
+    );
 
     container.querySelector(".edit-cancel-btn").onclick = () => {
         container.style.display = "none";
@@ -360,8 +351,7 @@ function showEditForm(task, li) {
         const dueDate = container.querySelector(".edit-due").value;
         const dueTime = container.querySelector(".edit-due-time").value;
 
-        let project = projSel.value;
-        if (project === "__new__") project = projCustom.value.trim();
+        let project = editProjectPicker.getValue();
 
         const tags = editTagPicker.getSelectedTags();
 
@@ -376,6 +366,12 @@ function showEditForm(task, li) {
         }
         // Always send tags to handle removals
         updates.tags = tags;
+
+        // Recurrence
+        const recurrence = _getRecurValue(container);
+        if (recurrence !== (task.recurrence || "")) {
+            updates.recurrence = recurrence || null;
+        }
 
         if (Object.keys(updates).length > 0) {
             await api("PATCH", `/api/tasks/${task.id}`, updates);
@@ -401,6 +397,52 @@ function toTimeValue(isoStr) {
         const pad = n => String(n).padStart(2, "0");
         return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
     } catch (e) { return ""; }
+}
+
+// ---------------------------------------------------------------------------
+// Project picker — type-to-search combo input with dropdown
+// ---------------------------------------------------------------------------
+function createProjectPicker(inputEl, dropdownEl) {
+    function showDropdown() {
+        const query = inputEl.value.trim().toLowerCase();
+        const matches = knownProjects.filter(p =>
+            p.toLowerCase().includes(query)
+        );
+
+        dropdownEl.innerHTML = "";
+        matches.forEach(p => {
+            const item = document.createElement("div");
+            item.className = "project-dropdown-item";
+            item.textContent = p;
+            item.addEventListener("mousedown", e => {
+                e.preventDefault();
+                inputEl.value = p;
+                hideDropdown();
+            });
+            dropdownEl.appendChild(item);
+        });
+
+        dropdownEl.classList.toggle("visible", dropdownEl.children.length > 0);
+    }
+
+    function hideDropdown() {
+        dropdownEl.classList.remove("visible");
+    }
+
+    inputEl.addEventListener("input", showDropdown);
+    inputEl.addEventListener("focus", showDropdown);
+    inputEl.addEventListener("blur", () => {
+        // Small delay so mousedown on dropdown items fires first
+        setTimeout(hideDropdown, 150);
+    });
+    inputEl.addEventListener("keydown", e => {
+        if (e.key === "Escape") hideDropdown();
+    });
+
+    return {
+        getValue: () => inputEl.value.trim(),
+        clear: () => { inputEl.value = ""; },
+    };
 }
 
 // ---------------------------------------------------------------------------
@@ -510,8 +552,10 @@ function setupAddForm() {
     const form = document.getElementById("add-form");
     const saveBtn = document.getElementById("save-task-btn");
     const cancelBtn = document.getElementById("cancel-task-btn");
-    const projectSel = document.getElementById("new-project");
-    const projectCustom = document.getElementById("new-project-custom");
+    const addProjectPicker = createProjectPicker(
+        document.getElementById("new-project-input"),
+        document.getElementById("new-project-dropdown"),
+    );
     const prioritySel = document.getElementById("new-priority");
 
     // Init tag picker for add form
@@ -521,6 +565,13 @@ function setupAddForm() {
         document.getElementById("new-tag-dropdown"),
     );
 
+    // Init recurrence picker for add form
+    const addRecurType = document.getElementById("new-recur-type");
+    const addRecurDetail = document.getElementById("new-recur-detail");
+    addRecurType.addEventListener("change", () => {
+        _renderRecurDetail(addRecurDetail, addRecurType.value, { type: "", n: 1, days: [] });
+    });
+
     addBtn.addEventListener("click", () => {
         form.style.display = form.style.display === "none" ? "block" : "none";
         if (form.style.display === "block") {
@@ -528,16 +579,7 @@ function setupAddForm() {
         }
     });
 
-    // Show custom input when "+ new project" is selected
-    projectSel.addEventListener("change", () => {
-        if (projectSel.value === "__new__") {
-            projectCustom.style.display = "";
-            projectCustom.focus();
-        } else {
-            projectCustom.style.display = "none";
-            projectCustom.value = "";
-        }
-    });
+
 
     // Clear required-missing indicator when priority is selected
     prioritySel.addEventListener("change", () => {
@@ -566,9 +608,7 @@ function setupAddForm() {
         const dueDate = document.getElementById("new-due").value;
         const dueTime = document.getElementById("new-due-time").value;
 
-        // Project: use custom input if "+ new" was selected
-        let project = projectSel.value;
-        if (project === "__new__") project = projectCustom.value.trim();
+        let project = addProjectPicker.getValue();
         if (project === "") project = null;
 
         // Tags from tag picker
@@ -578,6 +618,13 @@ function setupAddForm() {
         if (project) body.project = project;
         if (tags.length) body.tags = tags;
         if (dueDate) body.due = dueTime ? `${dueDate}T${dueTime}` : dueDate;
+
+        // Recurrence from add form
+        const addRecurrence = _getRecurValueFrom(
+            document.getElementById("new-recur-type"),
+            document.getElementById("new-recur-detail"),
+        );
+        if (addRecurrence) body.recurrence = addRecurrence;
 
         await api("POST", "/api/tasks", body);
         form.style.display = "none";
@@ -591,12 +638,12 @@ function clearForm() {
     document.getElementById("new-description").value = "";
     document.getElementById("new-priority").value = "";
     document.getElementById("new-priority").classList.remove("required-missing");
-    document.getElementById("new-project").value = "";
-    document.getElementById("new-project-custom").value = "";
-    document.getElementById("new-project-custom").style.display = "none";
+    document.getElementById("new-project-input").value = "";
     if (addFormTagPicker) addFormTagPicker.clear();
     document.getElementById("new-due").value = "";
     document.getElementById("new-due-time").value = "";
+    document.getElementById("new-recur-type").value = "";
+    document.getElementById("new-recur-detail").innerHTML = "";
 }
 
 // ---------------------------------------------------------------------------
@@ -647,6 +694,94 @@ function setupBrainDump() {
         });
         window.location.href = `/?c=${conv.id}&init=1`;
     });
+}
+
+// ---------------------------------------------------------------------------
+// Recurrence picker helpers
+// ---------------------------------------------------------------------------
+const WEEKDAY_NAMES = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
+
+function _parseRecurType(rule) {
+    if (!rule) return { type: "", n: 1, days: [] };
+    rule = rule.toLowerCase().trim();
+    if (rule === "daily") return { type: "daily", n: 1, days: [] };
+    if (rule === "weekly") return { type: "weekly", n: 1, days: [] };
+    if (rule === "biweekly") return { type: "weekly", n: 2, days: [] };
+    if (rule === "monthly") return { type: "monthly", n: 1, days: [] };
+
+    let m = rule.match(/^every\s+(\d+)\s+days?$/);
+    if (m) return { type: "daily", n: parseInt(m[1]), days: [] };
+    m = rule.match(/^every\s+(\d+)\s+weeks?$/);
+    if (m) return { type: "weekly", n: parseInt(m[1]), days: [] };
+    m = rule.match(/^every\s+(\d+)\s+months?$/);
+    if (m) return { type: "monthly", n: parseInt(m[1]), days: [] };
+
+    // "weekdays:mon,wed,fri"
+    m = rule.match(/^weekdays:(.+)$/);
+    if (m) return { type: "weekdays", n: 1, days: m[1].split(",").map(d => d.trim()) };
+
+    return { type: "", n: 1, days: [] };
+}
+
+function _renderRecurDetail(detailEl, type, recurType) {
+    if (!type) {
+        detailEl.innerHTML = "";
+        return;
+    }
+    if (type === "weekdays") {
+        detailEl.innerHTML = WEEKDAY_NAMES.map(d =>
+            `<label class="weekday-toggle">
+                <input type="checkbox" value="${d}" ${recurType.days.includes(d) ? "checked" : ""} />
+                <span>${d}</span>
+            </label>`
+        ).join("");
+    } else {
+        const unit = type === "daily" ? "days" : type === "weekly" ? "weeks" : "months";
+        detailEl.innerHTML = `
+            <span style="font-size:0.75rem;color:#888;">every</span>
+            <input class="form-input recur-n" type="number" min="1" value="${recurType.type === type ? recurType.n : 1}"
+                   style="width:3.5rem;flex:none;" />
+            <span style="font-size:0.75rem;color:#888;">${unit}</span>
+        `;
+    }
+}
+
+function _initRecurDetail(container, recurType) {
+    const typeSelect = container.querySelector(".edit-recur-type");
+    const detailEl = container.querySelector(".recur-detail");
+
+    typeSelect.addEventListener("change", () => {
+        recurType = { type: typeSelect.value, n: 1, days: [] };
+        _renderRecurDetail(detailEl, typeSelect.value, recurType);
+    });
+    _renderRecurDetail(detailEl, typeSelect.value, recurType);
+}
+
+function _getRecurValueFrom(typeEl, detailEl) {
+    const type = typeEl?.value;
+    if (!type) return "";
+
+    if (type === "weekdays") {
+        const checked = [...detailEl.querySelectorAll(".weekday-toggle input:checked")]
+            .map(cb => cb.value);
+        return checked.length ? `weekdays:${checked.join(",")}` : "";
+    }
+
+    const nInput = detailEl.querySelector(".recur-n");
+    const n = nInput ? parseInt(nInput.value) || 1 : 1;
+    const unit = type === "daily" ? "days" : type === "weekly" ? "weeks" : "months";
+
+    if (n === 1) {
+        return type === "daily" ? "daily" : type === "weekly" ? "weekly" : "monthly";
+    }
+    return `every ${n} ${unit}`;
+}
+
+function _getRecurValue(container) {
+    return _getRecurValueFrom(
+        container.querySelector(".edit-recur-type"),
+        container.querySelector(".recur-detail"),
+    );
 }
 
 // ---------------------------------------------------------------------------

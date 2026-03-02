@@ -54,18 +54,27 @@
             </div>
             <textarea id="new-description" class="form-textarea" rows="2" placeholder="description (optional)..."></textarea>
             <div class="form-row">
-                <select id="new-project" class="form-select">
-                    <option value="">project</option>
-                    <option value="__new__">+ new project</option>
-                </select>
-                <input id="new-project-custom" class="form-input" placeholder="new project name..." style="display:none;" />
-                <div class="tag-picker" id="new-tag-picker">
-                    <div class="tag-chips" id="new-tag-chips"></div>
+                <div class="project-picker" id="new-project-picker">
+                    <input class="form-input form-select-auto project-input" id="new-project-input" placeholder="project..." autocomplete="off" />
+                    <div class="project-dropdown" id="new-project-dropdown"></div>
+                </div>
+                <div class="tag-picker tag-picker-compact" id="new-tag-picker">
                     <input class="tag-search-input" id="new-tag-input" placeholder="tags..." autocomplete="off" />
                     <div class="tag-dropdown" id="new-tag-dropdown"></div>
                 </div>
-                <input id="new-due" class="form-input" type="date" />
-                <input id="new-due-time" class="form-input" type="time" placeholder="time" />
+                <input id="new-due" class="form-input form-input-date" type="date" />
+                <input id="new-due-time" class="form-input form-input-time" type="time" placeholder="time" />
+            </div>
+            <div class="tag-chips-row" id="new-tag-chips"></div>
+            <div class="form-row recurrence-row">
+                <select id="new-recur-type" class="form-select form-select-auto">
+                    <option value="">no repeat</option>
+                    <option value="daily">every N days</option>
+                    <option value="weekly">every N weeks</option>
+                    <option value="monthly">every N months</option>
+                    <option value="weekdays">days of week</option>
+                </select>
+                <div id="new-recur-detail" class="recur-detail"></div>
             </div>
             <div class="form-actions">
                 <button id="save-task-btn" class="btn-dark">save</button>

@@ -223,6 +223,12 @@ async function loadBriefingContent(dateStr) {
     }
 
     content.innerHTML = renderBriefingMarkdown(data.assembled_text || "");
+    if (data.model) {
+        const badge = document.createElement("div");
+        badge.className = "briefing-model-badge";
+        badge.textContent = "assembled by " + data.model;
+        content.prepend(badge);
+    }
     content.style.display = "block";
 
     // Init chat for this briefing

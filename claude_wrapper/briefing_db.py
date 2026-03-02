@@ -63,6 +63,11 @@ class BriefingDatabase:
             conn.execute("ALTER TABLE briefings ADD COLUMN chat_conversation_id TEXT")
         except sqlite3.OperationalError:
             pass  # column already exists
+        # Track which model generated the briefing
+        try:
+            conn.execute("ALTER TABLE briefings ADD COLUMN model TEXT")
+        except sqlite3.OperationalError:
+            pass
         conn.commit()
         conn.close()
 
@@ -70,18 +75,18 @@ class BriefingDatabase:
     # Briefings
     # ------------------------------------------------------------------
 
-    def save_briefing(self, date_str: str, sections: dict, assembled_text: str) -> dict:
+    def save_briefing(self, date_str: str, sections: dict, assembled_text: str, model: str | None = None) -> dict:
         """Insert or replace a briefing for the given date."""
         now = _utcnow()
         conn = self._connect()
         conn.execute(
-            """INSERT INTO briefings (date, sections, assembled_text, assembled_at)
-               VALUES (?, ?, ?, ?)
+            """INSERT INTO briefings (date, sections, assembled_text, assembled_at, model)
+               VALUES (?, ?, ?, ?, ?)
                ON CONFLICT(date) DO UPDATE SET
                    sections = excluded.sections,
                    assembled_text = excluded.assembled_text,
-                   assembled_at = excluded.assembled_at""",
-            (date_str, json.dumps(sections), assembled_text, now),
+                   assembled_at = excluded.assembled_at, model = excluded.model""",
+            (date_str, json.dumps(sections), assembled_text, now, model),
         )
         conn.commit()
         conn.close()
