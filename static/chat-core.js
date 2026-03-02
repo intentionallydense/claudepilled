@@ -389,6 +389,9 @@ function createChatCore(config) {
     let arrowNavActive = false;
     let arrowNavTimer = null;
 
+    // Compaction state
+    let compactions = [];
+
     // Image state
     let pendingImages = [];
     let editPendingImages = [];
@@ -698,6 +701,12 @@ function createChatCore(config) {
                 }
                 break;
 
+            case "compaction_done":
+                if (config.onCompactionDone) {
+                    config.onCompactionDone(event);
+                }
+                break;
+
             case "error": {
                 if (!streamingEl) startStreamingMessage();
                 const isRetry = event.error && event.error.includes("retrying");
@@ -891,10 +900,54 @@ function createChatCore(config) {
         }
     }
 
+    function renderCompactionDivider(compaction) {
+        const divider = document.createElement("div");
+        divider.className = "compaction-divider";
+
+        const label = document.createElement("div");
+        label.className = "compaction-label";
+        const arrow = document.createElement("span");
+        arrow.className = "compaction-arrow";
+        arrow.innerHTML = "&#9654;";
+        label.appendChild(arrow);
+        label.appendChild(document.createTextNode(` compacted (${compaction.message_count} messages)`));
+        divider.appendChild(label);
+
+        const summary = document.createElement("div");
+        summary.className = "compaction-summary";
+        summary.style.display = "none";
+        summary.textContent = compaction.summary;
+        divider.appendChild(summary);
+
+        label.onclick = () => {
+            const isOpen = summary.style.display !== "none";
+            summary.style.display = isOpen ? "none" : "block";
+            arrow.classList.toggle("open", !isOpen);
+        };
+
+        return divider;
+    }
+
     function renderConversationMessages(messages) {
         el.messages.innerHTML = "";
         let renderedCount = 0;
         let lastAssistantEl = null;
+
+        // Find the latest applicable compaction cutoff message ID
+        const msgIds = new Set(messages.map(m => m.id));
+        let activeCompaction = null;
+        let compactedCutoffId = null;
+        for (let i = compactions.length - 1; i >= 0; i--) {
+            if (msgIds.has(compactions[i].compacted_up_to_msg_id)) {
+                activeCompaction = compactions[i];
+                compactedCutoffId = compactions[i].compacted_up_to_msg_id;
+                break;
+            }
+        }
+
+        // Track whether we've passed the compaction point
+        let pastCutoff = !compactedCutoffId;
+        let dividerInserted = false;
 
         for (let i = 0; i < messages.length; i++) {
             const msg = messages[i];
@@ -906,7 +959,15 @@ function createChatCore(config) {
             // Merge consecutive assistant messages (from tool use loops)
             if (msg.role === "assistant" && lastAssistantEl) {
                 appendAssistantContent(lastAssistantEl, content);
+                // Check if this merged message is the cutoff
+                if (msg.id === compactedCutoffId) pastCutoff = true;
                 continue;
+            }
+
+            // Insert compaction divider right after the cutoff message
+            if (!dividerInserted && pastCutoff && compactedCutoffId && renderedCount > 0) {
+                el.messages.appendChild(renderCompactionDivider(activeCompaction));
+                dividerInserted = true;
             }
 
             if (renderedCount > 0) {
@@ -915,8 +976,24 @@ function createChatCore(config) {
                 el.messages.appendChild(spacer);
             }
             const rendered = renderMessage(msg.role, content, i, msg.id, msg.parent_id);
+
+            // Dim compacted messages
+            if (!pastCutoff && rendered) {
+                rendered.classList.add("compacted");
+            }
+
             lastAssistantEl = (msg.role === "assistant") ? rendered : null;
             renderedCount++;
+
+            // Check if this message is the cutoff point
+            if (msg.id === compactedCutoffId) {
+                pastCutoff = true;
+            }
+        }
+
+        // Edge case: if all messages are compacted and no non-compacted messages follow
+        if (!dividerInserted && pastCutoff && compactedCutoffId) {
+            el.messages.appendChild(renderCompactionDivider(activeCompaction));
         }
     }
 
@@ -1313,6 +1390,9 @@ function createChatCore(config) {
         conversationId = convId;
         const conv = await apiFetch("GET", `/api/conversations/${convId}`);
 
+        // Store compaction data for rendering and re-renders
+        compactions = conv._compactions || [];
+
         el.messages.style.display = "flex";
         el.messages.innerHTML = "";
 
@@ -1595,6 +1675,7 @@ function createChatCore(config) {
         if (markdownRenderTimer) clearTimeout(markdownRenderTimer);
         if (arrowNavTimer) clearTimeout(arrowNavTimer);
         conversationId = null;
+        compactions = [];
         treeData = null;
         treeNodes = [];
         treeChildrenMap = {};

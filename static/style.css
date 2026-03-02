@@ -1210,6 +1210,50 @@ body {
 }
 
 /* ------------------------------------------------------------------ */
+/* Compacted messages — dimmed but still readable                      */
+/* ------------------------------------------------------------------ */
+.message.compacted { opacity: 0.5; }
+.message.compacted:hover { opacity: 0.75; }
+
+/* Compaction divider — dashed line with expandable summary */
+.compaction-divider {
+    max-width: 640px;
+    width: 100%;
+    margin: 0.75rem 0;
+    border-top: 1px dashed #ccc;
+    padding-top: 0.5rem;
+}
+.compaction-label {
+    font-size: 0.7rem;
+    color: #888;
+    cursor: pointer;
+    user-select: none;
+}
+.compaction-label:hover { color: #111; }
+.compaction-arrow {
+    display: inline-block;
+    transition: transform 0.2s;
+    font-size: 0.6rem;
+}
+.compaction-arrow.open { transform: rotate(90deg); }
+.compaction-summary {
+    font-size: 0.8rem;
+    color: #666;
+    margin-top: 0.5rem;
+    padding: 0.5rem;
+    background: #f8f8f8;
+    border: 1px solid #eee;
+    white-space: pre-wrap;
+    font-family: 'Open Sans', Helvetica, Arial, sans-serif;
+    line-height: 1.5;
+}
+
+/* Compact button in input actions bar */
+.compact-btn {
+    flex-shrink: 0;
+}
+
+/* ------------------------------------------------------------------ */
 /* Hamburger menu button + sidebar backdrop (hidden on desktop)        */
 /* ------------------------------------------------------------------ */
 .menu-btn {

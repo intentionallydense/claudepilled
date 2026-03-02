@@ -183,7 +183,10 @@ async def get_conversation(conversation_id: str):
     conv = manager.get_conversation(conversation_id)
     if conv is None:
         return JSONResponse(status_code=404, content={"error": "Not found"})
-    return conv.model_dump(mode="json")
+    data = conv.model_dump(mode="json")
+    meta = manager.db.get_conversation_metadata(conversation_id)
+    data["_compactions"] = (meta or {}).get("compactions", [])
+    return data
 
 
 @app.patch("/api/conversations/{conversation_id}")
@@ -316,10 +319,17 @@ async def websocket_chat(ws: WebSocket, conversation_id: str):
                 }))
                 continue
 
+            if action == "compact":
+                try:
+                    result = await manager.compact_conversation(conversation_id)
+                    await ws.send_text(json.dumps({"type": "compaction_done", **result}))
+                except ValueError as e:
+                    await ws.send_text(json.dumps({"type": "error", "error": str(e)}))
+                continue
+
             if action == "init":
-                # Model speaks first — no user message needed
-                init_model = payload.get("model", "claude-opus-4-6")
-                gen = manager.stream_init(conversation_id, model=init_model)
+                # Model speaks first — always uses Haiku (cheap, fast)
+                gen = manager.stream_init(conversation_id, model="claude-haiku-4-5-20251001")
             elif action == "edit":
                 parent_id = payload.get("parent_id") or None
                 if not user_text and not isinstance(user_message, list):

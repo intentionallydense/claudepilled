@@ -31,6 +31,7 @@ const contextBarFiles = document.getElementById("context-bar-files");
 const contextTokenCount = document.getElementById("context-token-count");
 const tagAutocomplete = document.getElementById("tag-autocomplete");
 const newChatBtn = document.getElementById("new-chat-btn");
+const compactBtn = document.getElementById("compact-btn");
 const menuBtn = document.getElementById("menu-btn");
 const sidebarBackdrop = document.getElementById("sidebar-backdrop");
 const sidebar = document.getElementById("sidebar");
@@ -106,6 +107,12 @@ const chatCore = createChatCore({
     },
 
     onEditDone() {
+        const id = chatCore.getConversationId();
+        if (id) openConversation(id);
+    },
+
+    onCompactionDone() {
+        // Reload conversation to re-render with compaction dividers
         const id = chatCore.getConversationId();
         if (id) openConversation(id);
     },
@@ -261,6 +268,13 @@ async function openConversation(id) {
     currentModel = conv.model;
     populatePromptSelect(conv.prompt_id || "");
 
+    // Show compact button if enough messages
+    if (compactBtn) {
+        compactBtn.style.display = (conv.messages || []).length >= 10 ? "" : "none";
+        compactBtn.textContent = "compact";
+        compactBtn.disabled = false;
+    }
+
     // Load context
     await loadContext();
 }
@@ -269,6 +283,7 @@ function showWelcome() {
     welcomeEl.style.display = "flex";
     messagesEl.style.display = "none";
     inputArea.style.display = "none";
+    if (compactBtn) compactBtn.style.display = "none";
     chatCore.destroy();
 }
 
@@ -784,6 +799,16 @@ if (sidebarBackdrop) sidebarBackdrop.onclick = () => toggleSidebar(false);
 // Event listeners (page-specific)
 // ---------------------------------------------------------------------------
 newChatBtn.onclick = quickCreateConversation;
+
+// Compact button — manually trigger conversation compaction
+if (compactBtn) {
+    compactBtn.onclick = () => {
+        if (!chatCore.getConversationId() || chatCore.isCurrentlyStreaming()) return;
+        compactBtn.textContent = "compacting...";
+        compactBtn.disabled = true;
+        chatCore.sendRaw({ action: "compact" });
+    };
+}
 
 // Tag autocomplete on input
 messageInput.addEventListener("input", handleTagAutocomplete);

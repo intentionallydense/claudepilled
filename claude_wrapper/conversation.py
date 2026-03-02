@@ -2,8 +2,8 @@
 
 Routes between Anthropic and OpenAI-compatible providers based on the
 conversation's model. Tool use is only supported for Anthropic models;
-non-Anthropic models get tools=None. Title generation always uses Anthropic
-Haiku (cheap, always available).
+non-Anthropic models get tools=None. Title and summary generation use
+GLM5 via OpenRouter (cheap, fast).
 
 Used by: server.py (creates the singleton ConversationManager at startup)
 """
@@ -11,13 +11,17 @@ Used by: server.py (creates the singleton ConversationManager at startup)
 from __future__ import annotations
 
 import json
+import os
+import uuid
 from collections.abc import AsyncGenerator
+from datetime import datetime, timezone
 from typing import Any
 
 from claude_wrapper.client import ClaudeClient, get_client_for_model
 from claude_wrapper.db import Database
 from claude_wrapper.models import (
     MODEL_PRICING,
+    PROVIDERS,
     ContentBlock,
     Conversation,
     Message,
@@ -27,6 +31,11 @@ from claude_wrapper.models import (
     get_api_model_id,
 )
 from claude_wrapper.tools import ToolRegistry
+
+# Model used for cheap system tasks (title generation, compaction summaries).
+# GLM5 via OpenRouter — fast and cheap. Falls back to Anthropic Haiku if
+# no OpenRouter API key is configured.
+_SYSTEM_MODEL = "z-ai/glm-5"
 
 
 class ConversationManager:
@@ -45,6 +54,7 @@ class ConversationManager:
         self.db = db or Database()
         self.file_db = file_db
         self.pin_db = pin_db
+        self._openrouter_client = None  # lazy-init AsyncOpenAI for system tasks
 
     def _get_client_and_tools(self, model: str):
         """Return (client, tool_defs, is_anthropic) for the given model.
@@ -58,6 +68,25 @@ class ConversationManager:
         client = get_client_for_model(model, self.client)
         tool_defs = (self.tools.get_definitions() or None) if is_anthropic else None
         return client, tool_defs, is_anthropic
+
+    async def _get_openrouter_client(self):
+        """Lazily create an AsyncOpenAI client for OpenRouter system tasks.
+
+        Used for title generation and compaction summaries — cheap calls
+        that don't need the full provider routing. Falls back to None if
+        no OpenRouter API key is set.
+        """
+        if self._openrouter_client is not None:
+            return self._openrouter_client
+        api_key = os.environ.get(PROVIDERS["openrouter"]["env_key"], "")
+        if not api_key:
+            return None
+        from openai import AsyncOpenAI
+        self._openrouter_client = AsyncOpenAI(
+            api_key=api_key,
+            base_url=PROVIDERS["openrouter"]["base_url"],
+        )
+        return self._openrouter_client
 
     # ------------------------------------------------------------------
     # Conversation CRUD
@@ -112,7 +141,8 @@ class ConversationManager:
         self.db.save_message(conversation_id, user_msg)
 
         client, tool_defs, is_anthropic = self._get_client_and_tools(conv.model)
-        api_messages = self._to_api_messages(conv.messages)
+        compactions = self._get_compactions(conversation_id)
+        api_messages = self._to_api_messages(conv.messages, compactions)
         effective_system = self._get_effective_system_prompt(conv)
 
         for _ in range(10):
@@ -127,7 +157,7 @@ class ConversationManager:
             assistant_msg.parent_id = conv.messages[-1].id
             conv.messages.append(assistant_msg)
             self.db.save_message(conversation_id, assistant_msg)
-            api_messages = self._to_api_messages(conv.messages)
+            api_messages = self._to_api_messages(conv.messages, compactions)
 
             tool_blocks = assistant_msg.tool_use_blocks()
             if not tool_blocks:
@@ -137,7 +167,7 @@ class ConversationManager:
             tool_msg = Message(role="user", content=tool_results, parent_id=assistant_msg.id)
             conv.messages.append(tool_msg)
             self.db.save_message(conversation_id, tool_msg)
-            api_messages = self._to_api_messages(conv.messages)
+            api_messages = self._to_api_messages(conv.messages, compactions)
 
         return conv.messages[-1].text()
 
@@ -169,10 +199,11 @@ class ConversationManager:
         self.db.save_message(conversation_id, user_msg)
 
         client, tool_defs, is_anthropic = self._get_client_and_tools(conv.model)
+        compactions = self._get_compactions(conversation_id)
         effective_system = self._get_effective_system_prompt(conv)
 
         for _ in range(10):
-            api_messages = self._to_api_messages(conv.messages)
+            api_messages = self._to_api_messages(conv.messages, compactions)
             collected_blocks: list[ContentBlock] = []
             text_parts: list[str] = []
             thinking_parts: list[str] = []
@@ -439,10 +470,11 @@ class ConversationManager:
         conv = self.db.load_conversation(conversation_id)
 
         client, tool_defs, is_anthropic = self._get_client_and_tools(conv.model)
+        compactions = self._get_compactions(conversation_id)
         effective_system = self._get_effective_system_prompt(conv)
 
         for _ in range(10):
-            api_messages = self._to_api_messages(conv.messages)
+            api_messages = self._to_api_messages(conv.messages, compactions)
             collected_blocks: list[ContentBlock] = []
             text_parts: list[str] = []
             thinking_parts: list[str] = []
@@ -561,23 +593,149 @@ class ConversationManager:
     # ------------------------------------------------------------------
 
     async def _generate_title(self, user_text: str) -> str:
-        """Generate a short title from the first user message using Haiku."""
+        """Generate a short title from the first user message.
+
+        Uses GLM5 via OpenRouter (cheap/fast). Falls back to Anthropic Haiku
+        if OpenRouter isn't configured.
+        """
+        prompt = (
+            "Generate a brief title (max 6 words) for a conversation that starts with "
+            "this message. Return only the title, no quotes or punctuation.\n\n"
+            + user_text[:500]
+        )
         try:
+            or_client = await self._get_openrouter_client()
+            if or_client:
+                response = await or_client.chat.completions.create(
+                    model=_SYSTEM_MODEL,
+                    max_tokens=30,
+                    messages=[{"role": "user", "content": prompt}],
+                )
+                return response.choices[0].message.content.strip().strip('"').strip("'")
+            # Fallback: Anthropic Haiku
             response = await self.client._async_client.messages.create(
                 model="claude-haiku-4-5-20251001",
                 max_tokens=30,
-                messages=[{
-                    "role": "user",
-                    "content": (
-                        "Generate a brief title (max 6 words) for a conversation that starts with "
-                        "this message. Return only the title, no quotes or punctuation.\n\n"
-                        + user_text[:500]
-                    ),
-                }],
+                messages=[{"role": "user", "content": prompt}],
             )
             return response.content[0].text.strip().strip('"').strip("'")
         except Exception:
             return user_text[:40] + ("..." if len(user_text) > 40 else "")
+
+    # ------------------------------------------------------------------
+    # Compaction — summarize older messages to save tokens
+    # ------------------------------------------------------------------
+
+    def _get_compactions(self, conversation_id: str) -> list[dict]:
+        """Load compaction records from conversation metadata."""
+        meta = self.db.get_conversation_metadata(conversation_id) or {}
+        return meta.get("compactions", [])
+
+    async def _generate_summary(self, messages_text: str, prev_summary: str | None = None) -> str:
+        """Generate a conversation summary using GLM5 via OpenRouter.
+
+        Falls back to Anthropic Haiku if OpenRouter isn't configured.
+        """
+        prompt_parts = []
+        if prev_summary:
+            prompt_parts.append(
+                "Previous conversation summary:\n" + prev_summary + "\n\n"
+                "New messages since that summary:\n"
+            )
+        prompt_parts.append(messages_text)
+        prompt_parts.append(
+            "\n\nSummarize this conversation concisely. Capture key topics, decisions, "
+            "code discussed, and context needed to continue the conversation. "
+            "Be specific about names, values, and conclusions — not vague."
+        )
+        content = "".join(prompt_parts)
+
+        try:
+            or_client = await self._get_openrouter_client()
+            if or_client:
+                response = await or_client.chat.completions.create(
+                    model=_SYSTEM_MODEL,
+                    max_tokens=1024,
+                    messages=[{"role": "user", "content": content}],
+                )
+                return response.choices[0].message.content.strip()
+            # Fallback: Anthropic Haiku
+            response = await self.client._async_client.messages.create(
+                model="claude-haiku-4-5-20251001",
+                max_tokens=1024,
+                messages=[{"role": "user", "content": content}],
+            )
+            return response.content[0].text.strip()
+        except Exception as e:
+            raise RuntimeError(f"Summary generation failed: {e}") from e
+
+    async def compact_conversation(self, conversation_id: str) -> dict:
+        """Compact older messages into a summary, keeping recent ones live.
+
+        Returns the new compaction record. Raises ValueError if there aren't
+        enough messages to compact.
+        """
+        conv = self.db.load_conversation(conversation_id)
+        if conv is None:
+            raise ValueError(f"Conversation {conversation_id} not found")
+
+        messages = conv.messages
+        if len(messages) < 10:
+            raise ValueError("Need at least 10 messages to compact")
+
+        # Keep the last 6 messages un-compacted (roughly 3 exchanges)
+        cutoff_index = len(messages) - 6
+        messages_to_compact = messages[:cutoff_index]
+
+        # Find previous compaction to use as context
+        compactions = self._get_compactions(conversation_id)
+        prev_summary = compactions[-1]["summary"] if compactions else None
+
+        # If there's a previous compaction, only summarize messages after it
+        if compactions:
+            prev_cutoff_id = compactions[-1]["compacted_up_to_msg_id"]
+            # Find the index of the previous cutoff message
+            start_index = 0
+            for i, m in enumerate(messages_to_compact):
+                if m.id == prev_cutoff_id:
+                    start_index = i + 1
+                    break
+            new_messages = messages_to_compact[start_index:]
+        else:
+            new_messages = messages_to_compact
+
+        if not new_messages:
+            raise ValueError("No new messages to compact")
+
+        # Build text representation of messages to summarize
+        text_parts = []
+        for m in new_messages:
+            role = "User" if m.role == "user" else "Assistant"
+            text_parts.append(f"{role}: {m.text()}")
+        messages_text = "\n\n".join(text_parts)
+
+        summary = await self._generate_summary(messages_text, prev_summary)
+
+        # Record which model actually did the summary
+        or_client = await self._get_openrouter_client()
+        model_used = f"openrouter/{_SYSTEM_MODEL}" if or_client else "claude-haiku-4-5-20251001"
+
+        # Build compaction record
+        compaction = {
+            "id": f"compact_{uuid.uuid4().hex[:10]}",
+            "compacted_up_to_msg_id": messages_to_compact[-1].id,
+            "summary": summary,
+            "message_count": len(messages_to_compact),
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "model_used": model_used,
+        }
+
+        # Persist to metadata
+        meta = self.db.get_conversation_metadata(conversation_id) or {}
+        meta.setdefault("compactions", []).append(compaction)
+        self.db.update_conversation_metadata(conversation_id, meta)
+
+        return compaction
 
     # ------------------------------------------------------------------
     # Prompt composition
@@ -681,5 +839,52 @@ class ConversationManager:
         return results
 
     @staticmethod
-    def _to_api_messages(messages: list[Message]) -> list[dict[str, Any]]:
-        return [m.to_api_format() for m in messages]
+    def _to_api_messages(
+        messages: list[Message],
+        compactions: list[dict] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Convert messages to API format, optionally replacing compacted messages with a summary.
+
+        If compactions exist, finds the latest one whose cutoff message is in the
+        current path. All messages up to and including that cutoff are replaced with
+        a user/assistant summary pair to maintain role alternation.
+        """
+        if not compactions:
+            return [m.to_api_format() for m in messages]
+
+        # Build set of message IDs on the current path for lookup
+        msg_ids = {m.id for m in messages}
+
+        # Find the latest applicable compaction (cutoff msg must be on current path)
+        active_compaction = None
+        for c in reversed(compactions):
+            if c["compacted_up_to_msg_id"] in msg_ids:
+                active_compaction = c
+                break
+
+        if not active_compaction:
+            return [m.to_api_format() for m in messages]
+
+        # Find the cutoff index
+        cutoff_id = active_compaction["compacted_up_to_msg_id"]
+        cutoff_index = None
+        for i, m in enumerate(messages):
+            if m.id == cutoff_id:
+                cutoff_index = i
+                break
+
+        if cutoff_index is None:
+            return [m.to_api_format() for m in messages]
+
+        # Replace compacted messages with a summary pair
+        summary_text = active_compaction["summary"]
+        api_messages = [
+            {"role": "user", "content": f"[Conversation summary]\n\n{summary_text}"},
+            {"role": "assistant", "content": "Understood, I have the context from our earlier conversation. Let's continue."},
+        ]
+
+        # Append remaining messages after the cutoff
+        remaining = messages[cutoff_index + 1:]
+        api_messages.extend(m.to_api_format() for m in remaining)
+
+        return api_messages

@@ -97,10 +97,10 @@ def assemble_briefing(
     data_block = json.dumps(sections, indent=2, default=str)
     messages = [{"role": "user", "content": ASSEMBLY_PROMPT + data_block}]
 
-    # Call Claude synchronously — no streaming needed for assembly
+    # Call Claude synchronously — Haiku is cheap enough for daily assembly
     response = client.send(
         messages,
-        model="claude-sonnet-4-6",
+        model="claude-haiku-4-5-20251001",
         system="You are a personal briefing assistant. Be warm and concise.",
         web_search=False,
     )
