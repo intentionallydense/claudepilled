@@ -457,14 +457,13 @@ body {
 /* Compact form controls — prevent project/tag from hogging space     */
 /* ------------------------------------------------------------------ */
 .form-select-auto {
-    flex: none;
-    width: auto;
+    flex: 1;
+    min-width: 0;
 }
 
 .tag-picker-compact {
-    flex: none;
-    min-width: 100px;
-    max-width: 150px;
+    flex: 1;
+    min-width: 0;
 }
 
 .form-input-date {
@@ -539,11 +538,12 @@ body {
 /* ------------------------------------------------------------------ */
 .project-picker {
     position: relative;
-    flex: none;
+    flex: 1;
+    min-width: 0;
 }
 
 .project-input {
-    width: 7rem;
+    width: 100%;
 }
 
 .project-dropdown {

@@ -292,7 +292,7 @@ function showEditForm(task, li) {
             <textarea class="form-textarea edit-description" rows="2">${esc(task.description || "")}</textarea>
             <div class="form-row">
                 <div class="project-picker edit-project-picker">
-                    <input class="form-input form-select-auto project-input edit-project-input" value="${esc(task.project || "")}" placeholder="project..." autocomplete="off" />
+                    <input class="form-input project-input edit-project-input" value="${esc(task.project || "")}" placeholder="project..." autocomplete="off" />
                     <div class="project-dropdown edit-project-dropdown"></div>
                 </div>
                 <div class="tag-picker tag-picker-compact edit-tag-picker">
@@ -304,7 +304,7 @@ function showEditForm(task, li) {
             </div>
             <div class="tag-chips-row edit-tag-chips"></div>
             <div class="form-row recurrence-row">
-                <select class="form-select form-select-auto edit-recur-type">
+                <select class="form-select edit-recur-type">
                     <option value="">no repeat</option>
                     <option value="daily" ${recurType.type === "daily" ? "selected" : ""}>every N days</option>
                     <option value="weekly" ${recurType.type === "weekly" ? "selected" : ""}>every N weeks</option>
