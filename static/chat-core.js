@@ -910,7 +910,13 @@ function createChatCore(config) {
             const newTextEl = document.createElement("div");
             newTextEl.className = "message-text";
             newTextEl.innerHTML = renderMarkdown(textParts.join(""));
-            msgEl.appendChild(newTextEl);
+            // Insert before .message-actions so actions stay at the bottom
+            const actionsEl = msgEl.querySelector(".message-actions");
+            if (actionsEl) {
+                msgEl.insertBefore(newTextEl, actionsEl);
+            } else {
+                msgEl.appendChild(newTextEl);
+            }
         }
     }
 

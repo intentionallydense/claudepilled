@@ -622,13 +622,7 @@ class ConversationManager:
                     log.warning("GLM5 returned empty content for title")
                     raise ValueError("empty content")
                 return content.strip().strip('"').strip("'")
-            # Fallback: Anthropic Haiku
-            response = await self.client._async_client.messages.create(
-                model="claude-haiku-4-5-20251001",
-                max_tokens=30,
-                messages=[{"role": "user", "content": prompt}],
-            )
-            return response.content[0].text.strip().strip('"').strip("'")
+            raise ValueError("No OpenRouter client — is OPENROUTER_API_KEY set?")
         except Exception as exc:
             log.warning("Title generation failed: %s", exc)
             return user_text[:40] + ("..." if len(user_text) > 40 else "")
@@ -673,13 +667,7 @@ class ConversationManager:
                 if not result:
                     raise ValueError("GLM5 returned empty content for summary")
                 return result.strip()
-            # Fallback: Anthropic Haiku
-            response = await self.client._async_client.messages.create(
-                model="claude-haiku-4-5-20251001",
-                max_tokens=1024,
-                messages=[{"role": "user", "content": content}],
-            )
-            return response.content[0].text.strip()
+            raise ValueError("No OpenRouter client — is OPENROUTER_API_KEY set?")
         except Exception as e:
             raise RuntimeError(f"Summary generation failed: {e}") from e
 

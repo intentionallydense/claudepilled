@@ -398,6 +398,8 @@ function renderContextBar() {
     }
     contextBar.style.display = "block";
     contextBarFiles.innerHTML = "";
+    // Scroll chat so messages aren't hidden behind the taller input area
+    chatCore.scrollToBottom();
 
     // Render file items
     for (const f of (activeContext.files || [])) {
