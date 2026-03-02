@@ -108,7 +108,9 @@ class TaskDatabase:
         conn = self._connect()
         row = conn.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)).fetchone()
         conn.close()
-        return dict(row) if row else None
+        if row is None:
+            return None
+        return self._deserialize(dict(row))
 
     def list_tasks(
         self,
@@ -246,9 +248,41 @@ class TaskDatabase:
         if task is None:
             return None
 
-        annotations = json.loads(task["annotations"])
+        annotations = task.get("annotations", [])
+        if isinstance(annotations, str):
+            annotations = json.loads(annotations)
         annotations.append({"timestamp": _utcnow(), "text": text})
 
+        return self.update(task_id, annotations=json.dumps(annotations))
+
+    def update_annotation(self, task_id: str, index: int, text: str) -> dict | None:
+        """Update the text of an annotation by index."""
+        task = self.get(task_id)
+        if task is None:
+            return None
+
+        annotations = task.get("annotations", [])
+        if isinstance(annotations, str):
+            annotations = json.loads(annotations)
+        if index < 0 or index >= len(annotations):
+            return None
+
+        annotations[index]["text"] = text
+        return self.update(task_id, annotations=json.dumps(annotations))
+
+    def delete_annotation(self, task_id: str, index: int) -> dict | None:
+        """Delete an annotation by index."""
+        task = self.get(task_id)
+        if task is None:
+            return None
+
+        annotations = task.get("annotations", [])
+        if isinstance(annotations, str):
+            annotations = json.loads(annotations)
+        if index < 0 or index >= len(annotations):
+            return None
+
+        annotations.pop(index)
         return self.update(task_id, annotations=json.dumps(annotations))
 
     # ------------------------------------------------------------------
@@ -259,8 +293,10 @@ class TaskDatabase:
         """Create the next instance of a recurring task."""
         from datetime import timedelta
 
+        from claude_wrapper.task_urgency import parse_date
+
         rule = completed_task["recurrence"].lower().strip()
-        due = datetime.fromisoformat(completed_task["due"])
+        due = parse_date(completed_task["due"])
 
         delta = _parse_recurrence(rule)
         if delta is None:

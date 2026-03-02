@@ -54,7 +54,13 @@
             </div>
             <textarea id="new-description" class="form-textarea" rows="2" placeholder="description (optional)..."></textarea>
             <div class="form-row">
-                <input id="new-project" class="form-input" placeholder="project..." />
+                <select id="new-project" class="form-select">
+                    <option value="">project</option>
+                    <option value="__new__">+ new project</option>
+                </select>
+                <input id="new-project-custom" class="form-input" placeholder="new project name..." style="display:none;" />
+                <select id="new-tags-select" class="form-select" multiple>
+                </select>
                 <input id="new-tags" class="form-input" placeholder="tags (comma separated)..." />
                 <input id="new-due" class="form-input" type="datetime-local" />
             </div>

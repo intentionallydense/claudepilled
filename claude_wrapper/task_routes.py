@@ -14,7 +14,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from claude_wrapper.task_db import TaskDatabase
-from claude_wrapper.task_urgency import sort_by_urgency
+from claude_wrapper.task_urgency import parse_date, sort_by_urgency
 
 router = APIRouter(prefix="/api/tasks", tags=["tasks"])
 
@@ -61,6 +61,10 @@ class AnnotateRequest(BaseModel):
     text: str
 
 
+class UpdateAnnotationRequest(BaseModel):
+    text: str
+
+
 # ------------------------------------------------------------------
 # Endpoints
 # ------------------------------------------------------------------
@@ -79,7 +83,7 @@ async def list_tasks(
     )
     # Deserialize JSON fields for response
     for t in tasks:
-        _deserialize(t)
+        _deserialize(t)  # re-deserialize in case list_tasks returns raw rows
     return sort_by_urgency(tasks)
 
 
@@ -88,7 +92,7 @@ async def task_summary():
     """Urgency-sorted summary for Claude context injection."""
     tasks = task_db.list_tasks()
     for t in tasks:
-        _deserialize(t)
+        _deserialize(t)  # re-deserialize in case list_tasks returns raw rows
     sorted_tasks = sort_by_urgency(tasks)
     # Return top 20 with minimal fields
     summary = []
@@ -130,12 +134,23 @@ async def get_task(task_id: str):
 
 @router.post("")
 async def create_task(req: CreateTaskRequest):
-    return task_db.create(**req.model_dump())
+    data = req.model_dump()
+    # Normalize dates so they're always parseable by fromisoformat
+    for field in ("due", "wait"):
+        if data.get(field):
+            data[field] = parse_date(data[field]).isoformat()
+    return task_db.create(**data)
 
 
 @router.patch("/{task_id}")
 async def update_task(task_id: str, req: UpdateTaskRequest):
-    updates = {k: v for k, v in req.model_dump().items() if v is not None}
+    # exclude_unset=True so sending null explicitly clears a field,
+    # while omitting a field leaves it unchanged.
+    updates = req.model_dump(exclude_unset=True)
+    # Normalize dates
+    for field in ("due", "wait"):
+        if field in updates and updates[field]:
+            updates[field] = parse_date(updates[field]).isoformat()
     if not updates:
         return JSONResponse(status_code=400, content={"error": "No fields to update"})
     task = task_db.update(task_id, **updates)
@@ -181,6 +196,24 @@ async def stop_task(task_id: str):
 @router.post("/{task_id}/annotate")
 async def annotate_task(task_id: str, req: AnnotateRequest):
     task = task_db.annotate(task_id, req.text)
+    if task is None:
+        return JSONResponse(status_code=404, content={"error": "Not found"})
+    _deserialize(task)
+    return task
+
+
+@router.patch("/{task_id}/annotations/{index}")
+async def update_annotation(task_id: str, index: int, req: UpdateAnnotationRequest):
+    task = task_db.update_annotation(task_id, index, req.text)
+    if task is None:
+        return JSONResponse(status_code=404, content={"error": "Not found"})
+    _deserialize(task)
+    return task
+
+
+@router.delete("/{task_id}/annotations/{index}")
+async def delete_annotation(task_id: str, index: int):
+    task = task_db.delete_annotation(task_id, index)
     if task is None:
         return JSONResponse(status_code=404, content={"error": "Not found"})
     _deserialize(task)

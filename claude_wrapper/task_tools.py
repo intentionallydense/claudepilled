@@ -13,8 +13,17 @@ import json
 from typing import Any
 
 from claude_wrapper.task_db import TaskDatabase
-from claude_wrapper.task_urgency import sort_by_urgency
+from claude_wrapper.task_urgency import parse_date, sort_by_urgency
 from claude_wrapper.tools import ToolRegistry
+
+
+def _normalize_date(raw: str) -> str:
+    """Validate and normalize a date string to ISO format.
+
+    Accepts whatever parse_date handles (ISO, US format, Z suffix, etc.)
+    and returns a clean ISO string that Python's fromisoformat can always parse.
+    """
+    return parse_date(raw).isoformat()
 
 
 def _parse_tags(raw: str) -> list[str]:
@@ -111,11 +120,11 @@ def register_task_tools(registry: ToolRegistry, task_db: TaskDatabase) -> None:
         if tags:
             kwargs["tags"] = _parse_tags(tags)
         if due:
-            kwargs["due"] = due
+            kwargs["due"] = _normalize_date(due)
         if depends:
             kwargs["depends"] = [d.strip() for d in depends.split(",") if d.strip()]
         if wait:
-            kwargs["wait"] = wait
+            kwargs["wait"] = _normalize_date(wait)
         if recurrence:
             kwargs["recurrence"] = recurrence
         task = task_db.create(**kwargs)
@@ -130,6 +139,9 @@ def register_task_tools(registry: ToolRegistry, task_db: TaskDatabase) -> None:
         project: str = "",
         tags: str = "",
         due: str = "",
+        depends: str = "",
+        wait: str = "",
+        recurrence: str = "",
         status: str = "",
     ) -> str:
         updates: dict[str, Any] = {}
@@ -144,7 +156,13 @@ def register_task_tools(registry: ToolRegistry, task_db: TaskDatabase) -> None:
         if tags:
             updates["tags"] = _parse_tags(tags)
         if due:
-            updates["due"] = due
+            updates["due"] = _normalize_date(due)
+        if depends:
+            updates["depends"] = [d.strip() for d in depends.split(",") if d.strip()]
+        if wait:
+            updates["wait"] = _normalize_date(wait)
+        if recurrence:
+            updates["recurrence"] = recurrence
         if status and status in ("pending", "active"):
             updates["status"] = status
         task = task_db.update(id, **updates)

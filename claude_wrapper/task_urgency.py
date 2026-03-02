@@ -11,7 +11,37 @@ dict to adjust behavior.
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime, timezone
+
+
+def parse_date(date_str: str) -> datetime:
+    """Parse a date string into a timezone-aware datetime.
+
+    Handles multiple formats:
+    - ISO 8601 with Z suffix: "2026-03-03T08:00:00.000Z"
+    - ISO 8601 with offset: "2026-03-03T08:00:00+00:00"
+    - ISO date only: "2026-03-03"
+    - ISO datetime no tz: "2026-03-03T08:00:00"
+    - US format: "3/3/2026"
+
+    Always returns a UTC-aware datetime.
+    """
+    s = date_str.strip()
+
+    # Replace Z with +00:00 for fromisoformat compatibility (Python < 3.11)
+    s = re.sub(r"Z$", "+00:00", s)
+
+    # Try US date format (M/D/YYYY)
+    m = re.match(r"^(\d{1,2})/(\d{1,2})/(\d{4})$", s)
+    if m:
+        month, day, year = int(m.group(1)), int(m.group(2)), int(m.group(3))
+        return datetime(year, month, day, tzinfo=timezone.utc)
+
+    dt = datetime.fromisoformat(s)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt
 
 # Days before due date when urgency starts ramping
 DUE_RAMP_DAYS = 14
@@ -59,9 +89,7 @@ def compute_urgency(task: dict, all_tasks: dict[str, dict] | None = None,
     # Age — older pending tasks slowly rise
     created_str = task.get("created")
     if created_str:
-        created = datetime.fromisoformat(created_str)
-        if created.tzinfo is None:
-            created = created.replace(tzinfo=timezone.utc)
+        created = parse_date(created_str)
         age_days = (now - created).total_seconds() / 86400
         score += min(coeff["age_max"], age_days / coeff["age_days"] * coeff["age_max"])
 
@@ -84,9 +112,7 @@ def compute_urgency(task: dict, all_tasks: dict[str, dict] | None = None,
     # Waiting penalty
     wait_str = task.get("wait")
     if wait_str:
-        wait = datetime.fromisoformat(wait_str)
-        if wait.tzinfo is None:
-            wait = wait.replace(tzinfo=timezone.utc)
+        wait = parse_date(wait_str)
         if wait > now:
             score += coeff["waiting_penalty"]
 
@@ -95,9 +121,7 @@ def compute_urgency(task: dict, all_tasks: dict[str, dict] | None = None,
 
 def _due_score(due_str: str, now: datetime) -> float:
     """Score based on proximity to due date."""
-    due = datetime.fromisoformat(due_str)
-    if due.tzinfo is None:
-        due = due.replace(tzinfo=timezone.utc)
+    due = parse_date(due_str)
 
     days_until = (due - now).total_seconds() / 86400
 
