@@ -10,8 +10,9 @@ from __future__ import annotations
 
 import json
 import ssl
-import urllib.request
 import urllib.error
+import urllib.parse
+import urllib.request
 from datetime import date
 from typing import Any
 
@@ -157,6 +158,111 @@ def fetch_wikipedia_featured(target_date: date | None = None) -> dict | None:
         }
     except (urllib.error.URLError, json.JSONDecodeError, OSError):
         return None
+
+
+# Wikipedia categories to draw "concept of the day" from when science RSS is dry.
+# Mix of broad and specific — enough variety to stay interesting for months.
+_SCIENCE_WIKI_CATEGORIES = [
+    "Fundamental_physics_concepts",
+    "Quantum_mechanics",
+    "Thermodynamics",
+    "Concepts_in_physics",
+    "Chemical_elements",
+    "Organic_chemistry",
+    "Chemical_reactions",
+    "Biochemistry",
+    "Mathematical_concepts",
+    "Abstract_algebra",
+    "Topology",
+    "Number_theory",
+    "Probability_theory",
+    "Differential_equations",
+    "Algorithms",
+    "Data_structures",
+    "Computational_complexity_theory",
+    "Machine_learning",
+    "Information_theory",
+    "Group_theory",
+    "Linear_algebra",
+    "Functional_analysis",
+    "Electromagnetism",
+    "Optics",
+    "Particle_physics",
+    "Astrophysics",
+    "Polymer_chemistry",
+    "Catalysis",
+]
+
+
+def fetch_random_science_wiki(
+    briefing_db: BriefingDatabase | None = None, count: int = 3,
+) -> list[dict]:
+    """Pick random science/math/CS Wikipedia articles as concepts-of-the-day.
+
+    Used as a fallback when science RSS feeds are empty. Picks from random
+    categories, dedupes via shown_posts so concepts don't repeat across days.
+    Returns up to `count` articles.
+    """
+    import random
+
+    results = []
+    cats = _SCIENCE_WIKI_CATEGORIES.copy()
+    random.shuffle(cats)
+
+    for cat in cats:
+        if len(results) >= count:
+            break
+        try:
+            # Fetch category members
+            api_url = (
+                "https://en.wikipedia.org/w/api.php?"
+                "action=query&list=categorymembers"
+                f"&cmtitle=Category:{cat}&cmtype=page&cmlimit=50&format=json"
+            )
+            req = urllib.request.Request(api_url, headers={"User-Agent": "ClaudeWrapper/1.0"})
+            resp = _OPENER.open(req, timeout=10)
+            data = json.loads(resp.read().decode("utf-8"))
+
+            members = data.get("query", {}).get("categorymembers", [])
+            if not members:
+                continue
+
+            # Shuffle members so we don't always pick the same ones from a category
+            random.shuffle(members)
+
+            for article in members:
+                if len(results) >= count:
+                    break
+
+                title = article["title"].replace(" ", "_")
+                page_url = f"https://en.wikipedia.org/wiki/{urllib.parse.quote(title)}"
+
+                # Skip if already shown
+                if briefing_db is not None and briefing_db.was_shown(page_url):
+                    continue
+
+                # Fetch summary
+                summary_url = f"https://en.wikipedia.org/api/rest_v1/page/summary/{urllib.parse.quote(title)}"
+                req2 = urllib.request.Request(summary_url, headers={"User-Agent": "ClaudeWrapper/1.0"})
+                resp2 = _OPENER.open(req2, timeout=10)
+                summary = json.loads(resp2.read().decode("utf-8"))
+
+                result = {
+                    "title": summary.get("title", article["title"]),
+                    "extract": summary.get("extract", ""),
+                    "url": summary.get("content_urls", {}).get("desktop", {}).get("page", page_url),
+                    "category": cat.replace("_", " "),
+                }
+                results.append(result)
+
+                # Mark as shown
+                if briefing_db is not None:
+                    briefing_db.mark_shown(result["url"], "science_wiki")
+
+        except (urllib.error.URLError, json.JSONDecodeError, OSError, KeyError):
+            continue
+
+    return results
 
 
 def check_acx_new_posts(briefing_db: BriefingDatabase) -> dict | None:

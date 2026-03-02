@@ -17,6 +17,7 @@ from claude_wrapper.briefing_feeds import (
     fetch_chemistry_news,
     fetch_ft_headlines,
     fetch_physics_news,
+    fetch_random_science_wiki,
     fetch_wikipedia_featured,
 )
 from claude_wrapper.briefing_sequential import get_long_read, get_todays_item
@@ -38,9 +39,11 @@ List all FT headlines as bullet points. For each, one sentence on what it means
 or why it matters. If the feed is empty, say so briefly.
 
 ## Science
-Pick the most interesting 2-3 items from the science news. One sentence each,
+If science_news has items: pick the most interesting 2-3 items. One sentence each,
 plus why it matters. Note the source (Nature Chemistry, C&EN, or Nature Physics).
-Chemistry and physics alternate by day. Skip if empty.
+If science_news is empty but science_concepts is present: present them as
+"concepts of the day" — for each, explain what it is and why it's interesting
+in 1-2 sentences. Include the link. Mention the category it came from.
 
 ## Today's Read
 Present the long read recommendation with a 2-3 sentence hook explaining
@@ -126,8 +129,8 @@ def _gather_sections(briefing_db: BriefingDatabase, task_db: TaskDatabase) -> di
     # FT headlines
     sections["ft_headlines"] = fetch_ft_headlines(max_items=10)
 
-    # Science news — chemistry/physics alternate by day-of-year parity
-    # (same pattern as Gwern/ACX long read alternation)
+    # Science news — chemistry/physics alternate by day-of-year parity.
+    # Falls back to a random science Wikipedia article when RSS is dry.
     day = today.timetuple().tm_yday
     if day % 2 == 0:
         sections["science_news"] = fetch_chemistry_news(briefing_db, max_items=5)
@@ -135,6 +138,9 @@ def _gather_sections(briefing_db: BriefingDatabase, task_db: TaskDatabase) -> di
     else:
         sections["science_news"] = fetch_physics_news(briefing_db, max_items=5)
         sections["science_topic"] = "physics"
+
+    if not sections["science_news"]:
+        sections["science_concepts"] = fetch_random_science_wiki(briefing_db, count=3)
 
     # ACX RSS check (before long read, so we can pass new post)
     acx_new = check_acx_new_posts(briefing_db)
