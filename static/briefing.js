@@ -54,6 +54,72 @@ const chatCore = createChatCore({
     },
     apiFetch: briefingApiFetch,
 
+    createMessageActions(role, actionsEl, msgId, parentId) {
+        if (role === "assistant") {
+            const copyBtn = document.createElement("button");
+            copyBtn.className = "msg-action-btn";
+            copyBtn.textContent = "copy";
+            copyBtn.onclick = () => {
+                const msgEl = copyBtn.closest(".message");
+                const textEl = msgEl.querySelector(".message-text");
+                const text = textEl?.innerText || textEl?.textContent || "";
+                navigator.clipboard.writeText(text).then(() => {
+                    copyBtn.textContent = "copied";
+                    setTimeout(() => { copyBtn.textContent = "copy"; }, 1500);
+                });
+            };
+            actionsEl.appendChild(copyBtn);
+
+            const regenBtn = document.createElement("button");
+            regenBtn.className = "msg-action-btn";
+            regenBtn.textContent = "regenerate";
+            regenBtn.onclick = () => {
+                if (chatCore.isCurrentlyStreaming() || !chatCore.getConversationId()) return;
+                const msgEl = regenBtn.closest(".message");
+                const userParentId = msgEl.dataset.parentId;
+                if (!userParentId) return;
+                const userMsgEl = document.getElementById("messages")
+                    .querySelector(`.message[data-msg-id="${userParentId}"]`);
+                if (!userMsgEl) return;
+                const rawText = userMsgEl.dataset.rawText;
+                if (!rawText) return;
+                const branchParentId = userMsgEl.dataset.parentId || null;
+                chatCore.setStreaming(true);
+                chatCore.sendRaw({
+                    action: "edit",
+                    parent_id: branchParentId,
+                    message: rawText,
+                });
+            };
+            actionsEl.appendChild(regenBtn);
+        }
+
+        const pinBtn = document.createElement("button");
+        pinBtn.className = "msg-action-btn";
+        pinBtn.textContent = "pin";
+        pinBtn.onclick = async () => {
+            const msgEl = pinBtn.closest(".message");
+            const textEl = msgEl.querySelector(".message-text");
+            const text = textEl?.innerText || textEl?.textContent || "";
+            if (!text.trim()) return;
+            try {
+                await briefingApiFetch("POST", "/api/pins", {
+                    type: "message",
+                    content: text.trim(),
+                    source: "briefing",
+                    conversation_id: chatCore.getConversationId(),
+                    message_id: msgId,
+                    tags: [],
+                });
+                pinBtn.textContent = "pinned";
+                setTimeout(() => { pinBtn.textContent = "pin"; }, 1500);
+            } catch (e) {
+                console.error("Failed to pin:", e);
+            }
+        };
+        actionsEl.appendChild(pinBtn);
+    },
+
     onEditDone() {
         // Reload conversation after edit/stop
         const id = chatCore.getConversationId();
@@ -364,15 +430,15 @@ document.addEventListener("keydown", (e) => {
 // ---------------------------------------------------------------------------
 marked.setOptions({ breaks: true, gfm: true });
 chatCore.attachListeners();
-chatCore.loadModels();
-loadProgress();
+chatCore.loadModels().then(() => {
+    loadProgress();
 
-// Load sidebar, then auto-select today's briefing
-loadBriefingList().then(async () => {
-    // Try to load today's briefing
-    const today = new Date().toISOString().slice(0, 10);
-    const hasToday = briefingList.some(b => b.date === today);
-    if (hasToday) {
-        await selectBriefing(today);
-    }
-});
+    // Load sidebar, then auto-select today's briefing
+    loadBriefingList().then(async () => {
+        const today = new Date().toISOString().slice(0, 10);
+        const hasToday = briefingList.some(b => b.date === today);
+        if (hasToday) {
+            await selectBriefing(today);
+        }
+    });
+}); // loadModels

@@ -472,8 +472,13 @@ function createChatCore(config) {
     // -----------------------------------------------------------------------
     // WebSocket
     // -----------------------------------------------------------------------
+    let wsReconnectTimer = null;
+    let wsIntentionallyClosed = false;
+
     function connectWebSocket(convId) {
-        if (ws) { ws.close(); ws = null; }
+        if (wsReconnectTimer) { clearTimeout(wsReconnectTimer); wsReconnectTimer = null; }
+        wsIntentionallyClosed = false;
+        if (ws) { wsIntentionallyClosed = true; ws.close(); ws = null; wsIntentionallyClosed = false; }
         const proto = location.protocol === "https:" ? "wss:" : "ws:";
         ws = new WebSocket(`${proto}//${location.host}/api/chat/${convId}`);
         ws.onopen = () => {};
@@ -485,6 +490,15 @@ function createChatCore(config) {
                 isStreaming = false;
                 el.input.disabled = false;
                 showSendButton();
+            }
+            // Auto-reconnect if this wasn't an intentional close (destroy/nav)
+            if (!wsIntentionallyClosed && conversationId) {
+                wsReconnectTimer = setTimeout(() => {
+                    wsReconnectTimer = null;
+                    if (conversationId && !ws) {
+                        connectWebSocket(conversationId);
+                    }
+                }, 1000);
             }
         };
         ws.onerror = () => {};
@@ -1035,7 +1049,13 @@ function createChatCore(config) {
         }
 
         container.appendChild(body);
-        parentEl.appendChild(container);
+        // Insert before .message-actions so actions stay at the bottom
+        const actionsEl = parentEl.querySelector(".message-actions");
+        if (actionsEl) {
+            parentEl.insertBefore(container, actionsEl);
+        } else {
+            parentEl.appendChild(container);
+        }
 
         header.onclick = () => {
             header.classList.toggle("open");
@@ -1671,6 +1691,8 @@ function createChatCore(config) {
     // Destroy — clean up WS and timers
     // -----------------------------------------------------------------------
     function destroy() {
+        if (wsReconnectTimer) { clearTimeout(wsReconnectTimer); wsReconnectTimer = null; }
+        wsIntentionallyClosed = true;
         if (ws) { ws.close(); ws = null; }
         if (markdownRenderTimer) clearTimeout(markdownRenderTimer);
         if (arrowNavTimer) clearTimeout(arrowNavTimer);

@@ -945,22 +945,25 @@ boardPanel.setAttribute("tabindex", "-1");
 // ---------------------------------------------------------------------------
 marked.setOptions({ breaks: true, gfm: true });
 chatCore.attachListeners();
-chatCore.loadModels();
-loadPrompts();
-loadAllTags();
-loadBoard();
-loadConversations().then(() => {
-    const params = new URLSearchParams(window.location.search);
-    const openId = params.get("c");
-    const autoInit = params.get("init") === "1";
-    if (openId) {
-        history.replaceState(null, "", "/");
-        openConversation(openId).then(() => {
-            // Model speaks first — send init action after WS connects
-            if (autoInit) {
-                chatCore.setStreaming(true);
-                chatCore.sendRaw({ action: "init", model: "claude-haiku-4-5-20251001" });
-            }
-        });
-    }
-});
+// Models must load before conversations — otherwise populateModelSelect()
+// overwrites the conversation's model with the first available option.
+chatCore.loadModels().then(() => {
+    loadPrompts();
+    loadAllTags();
+    loadBoard();
+    loadConversations().then(() => {
+        const params = new URLSearchParams(window.location.search);
+        const openId = params.get("c");
+        const autoInit = params.get("init") === "1";
+        if (openId) {
+            history.replaceState(null, "", "/");
+            openConversation(openId).then(() => {
+                // Model speaks first — send init action after WS connects
+                if (autoInit) {
+                    chatCore.setStreaming(true);
+                    chatCore.sendRaw({ action: "init", model: "claude-haiku-4-5-20251001" });
+                }
+            });
+        }
+    });
+}); // loadModels

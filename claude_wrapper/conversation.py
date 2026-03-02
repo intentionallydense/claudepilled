@@ -11,6 +11,7 @@ Used by: server.py (creates the singleton ConversationManager at startup)
 from __future__ import annotations
 
 import json
+import logging
 import os
 import uuid
 from collections.abc import AsyncGenerator
@@ -31,6 +32,8 @@ from claude_wrapper.models import (
     get_api_model_id,
 )
 from claude_wrapper.tools import ToolRegistry
+
+log = logging.getLogger(__name__)
 
 # Model used for cheap system tasks (title generation, compaction summaries).
 # GLM5 via OpenRouter — fast and cheap. Falls back to Anthropic Haiku if
@@ -606,12 +609,19 @@ class ConversationManager:
         try:
             or_client = await self._get_openrouter_client()
             if or_client:
+                # Disable reasoning — GLM5 has it on by default, which wastes
+                # tokens and can leave content=None for short system tasks.
                 response = await or_client.chat.completions.create(
                     model=_SYSTEM_MODEL,
                     max_tokens=30,
                     messages=[{"role": "user", "content": prompt}],
+                    extra_body={"reasoning": {"effort": "none"}},
                 )
-                return response.choices[0].message.content.strip().strip('"').strip("'")
+                content = response.choices[0].message.content
+                if not content:
+                    log.warning("GLM5 returned empty content for title")
+                    raise ValueError("empty content")
+                return content.strip().strip('"').strip("'")
             # Fallback: Anthropic Haiku
             response = await self.client._async_client.messages.create(
                 model="claude-haiku-4-5-20251001",
@@ -619,7 +629,8 @@ class ConversationManager:
                 messages=[{"role": "user", "content": prompt}],
             )
             return response.content[0].text.strip().strip('"').strip("'")
-        except Exception:
+        except Exception as exc:
+            log.warning("Title generation failed: %s", exc)
             return user_text[:40] + ("..." if len(user_text) > 40 else "")
 
     # ------------------------------------------------------------------
@@ -658,7 +669,10 @@ class ConversationManager:
                     max_tokens=1024,
                     messages=[{"role": "user", "content": content}],
                 )
-                return response.choices[0].message.content.strip()
+                result = response.choices[0].message.content
+                if not result:
+                    raise ValueError("GLM5 returned empty content for summary")
+                return result.strip()
             # Fallback: Anthropic Haiku
             response = await self.client._async_client.messages.create(
                 model="claude-haiku-4-5-20251001",
