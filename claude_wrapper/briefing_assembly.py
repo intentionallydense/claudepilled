@@ -6,6 +6,7 @@ Called by the cron CLI (cli_main) or /api/briefing/assemble endpoint.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import sys
 from datetime import date
@@ -21,8 +22,14 @@ from claude_wrapper.briefing_feeds import (
     fetch_wikipedia_featured,
 )
 from claude_wrapper.briefing_sequential import get_long_read, get_todays_item
+from claude_wrapper.models import PROVIDERS
 from claude_wrapper.task_db import TaskDatabase
 from claude_wrapper.task_urgency import sort_by_urgency
+
+log = logging.getLogger(__name__)
+
+# GLM5 via OpenRouter — reasoning enabled by default for richer briefings
+_SYSTEM_MODEL = "z-ai/glm-5"
 
 
 ASSEMBLY_PROMPT = """You are assembling a morning briefing — a warm, concise daily newsletter.
@@ -98,23 +105,62 @@ def assemble_briefing(
 
     # Build the prompt with gathered data
     data_block = json.dumps(sections, indent=2, default=str)
-    messages = [{"role": "user", "content": ASSEMBLY_PROMPT + data_block}]
+    user_content = ASSEMBLY_PROMPT + data_block
+    system_msg = "You are a personal briefing assistant. Be warm and concise."
 
-    # Call Claude synchronously — Haiku is cheap enough for daily assembly
-    response = client.send(
-        messages,
-        model="claude-haiku-4-5-20251001",
-        system="You are a personal briefing assistant. Be warm and concise.",
-        web_search=False,
-    )
+    # Try GLM5 via OpenRouter (thinking enabled by default for richer output)
+    assembled_text = _call_glm5(system_msg, user_content)
 
-    # Extract text from response
-    assembled_text = ""
-    for block in response.content:
-        if block.type == "text" and block.text:
-            assembled_text += block.text
+    # Fall back to Anthropic Haiku if OpenRouter isn't available
+    if assembled_text is None:
+        log.info("GLM5 unavailable, falling back to Haiku for briefing assembly")
+        messages = [{"role": "user", "content": user_content}]
+        response = client.send(
+            messages,
+            model="claude-haiku-4-5-20251001",
+            system=system_msg,
+            web_search=False,
+        )
+        assembled_text = ""
+        for block in response.content:
+            if block.type == "text" and block.text:
+                assembled_text += block.text
 
     return briefing_db.save_briefing(today, sections, assembled_text)
+
+
+def _call_glm5(system_msg: str, user_content: str) -> str | None:
+    """Call GLM5 via OpenRouter synchronously. Returns text or None if unavailable.
+
+    GLM5 has reasoning/thinking enabled by default — we leave it on so
+    the briefing benefits from deeper synthesis (connections section, etc.).
+    """
+    api_key = os.environ.get(PROVIDERS["openrouter"]["env_key"], "")
+    if not api_key:
+        return None
+
+    try:
+        from openai import OpenAI
+
+        or_client = OpenAI(
+            api_key=api_key,
+            base_url=PROVIDERS["openrouter"]["base_url"],
+        )
+        response = or_client.chat.completions.create(
+            model=_SYSTEM_MODEL,
+            messages=[
+                {"role": "system", "content": system_msg},
+                {"role": "user", "content": user_content},
+            ],
+        )
+        content = response.choices[0].message.content
+        if not content:
+            log.warning("GLM5 returned empty content for briefing assembly")
+            return None
+        return content
+    except Exception as e:
+        log.warning("GLM5 briefing assembly failed: %s", e)
+        return None
 
 
 def _gather_sections(briefing_db: BriefingDatabase, task_db: TaskDatabase) -> dict:

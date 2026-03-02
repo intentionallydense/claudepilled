@@ -332,6 +332,93 @@ body {
 }
 
 /* ------------------------------------------------------------------ */
+/* Tag picker — search-to-select with chips                           */
+/* ------------------------------------------------------------------ */
+.tag-picker {
+    position: relative;
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.25rem;
+    border: 1px solid #ddd;
+    padding: 0.2rem 0.35rem;
+    min-width: 150px;
+    flex: 1;
+    background: #fff;
+}
+.tag-picker:focus-within { border-color: #111; }
+
+.tag-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.2rem;
+}
+
+.tag-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.2rem;
+    background: #f0f0f0;
+    padding: 0.1rem 0.35rem;
+    font-size: 0.7rem;
+    color: #444;
+}
+.tag-chip-remove {
+    cursor: pointer;
+    color: #999;
+    font-size: 0.65rem;
+    line-height: 1;
+}
+.tag-chip-remove:hover { color: #d44; }
+
+.tag-search-input {
+    border: none;
+    outline: none;
+    font-family: inherit;
+    font-size: 0.8rem;
+    padding: 0.15rem 0;
+    min-width: 60px;
+    flex: 1;
+    background: transparent;
+    color: #111;
+}
+.tag-search-input::placeholder { color: #aaa; }
+
+.tag-dropdown {
+    display: none;
+    position: absolute;
+    top: 100%;
+    left: -1px;
+    right: -1px;
+    background: #fff;
+    border: 1px solid #ddd;
+    border-top: none;
+    max-height: 140px;
+    overflow-y: auto;
+    z-index: 10;
+}
+.tag-dropdown.visible { display: block; }
+
+.tag-dropdown-item {
+    padding: 0.3rem 0.5rem;
+    font-size: 0.75rem;
+    cursor: pointer;
+    color: #444;
+}
+.tag-dropdown-item:hover,
+.tag-dropdown-item.highlighted { background: #f5f5f5; }
+
+.tag-dropdown-item.create-new {
+    color: #888;
+    font-style: italic;
+}
+
+/* Required field indicator */
+.form-select.required-missing {
+    border-color: #d44;
+}
+
+/* ------------------------------------------------------------------ */
 /* Annotate inline form                                               */
 /* ------------------------------------------------------------------ */
 .annotate-form {
@@ -355,6 +442,7 @@ body {
     .form-input,
     .form-textarea,
     .filter-select,
+    .tag-search-input,
     .annotate-form input { font-size: 16px; }
 
     /* Larger touch targets */

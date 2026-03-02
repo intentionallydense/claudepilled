@@ -96,17 +96,6 @@ async function loadFilters() {
         newProjectSel.appendChild(newOpt);
     }
 
-    // Rebuild add-form tag select (multi-select with existing + new)
-    const newTagsSel = document.getElementById("new-tags-select");
-    if (newTagsSel) {
-        newTagsSel.innerHTML = "";
-        tags.forEach(t => {
-            const opt = document.createElement("option");
-            opt.value = t;
-            opt.textContent = `#${t}`;
-            newTagsSel.appendChild(opt);
-        });
-    }
 }
 
 function renderTasks() {
@@ -299,22 +288,13 @@ function showEditForm(task, li) {
     knownProjects.forEach(p => {
         projectOptions += `<option value="${esc(p)}" ${task.project === p ? "selected" : ""}>${esc(p)}</option>`;
     });
-    // Add current project if not in list
     if (task.project && !knownProjects.includes(task.project)) {
         projectOptions += `<option value="${esc(task.project)}" selected>${esc(task.project)}</option>`;
     }
     projectOptions += '<option value="__new__">+ new project</option>';
 
-    // Build tag checkboxes
-    const taskTags = task.tags || [];
-    const allTagsSet = new Set([...knownTags, ...taskTags]);
-    let tagCheckboxes = "";
-    for (const t of allTagsSet) {
-        const checked = taskTags.includes(t) ? "checked" : "";
-        tagCheckboxes += `<label class="tag-checkbox"><input type="checkbox" value="${esc(t)}" ${checked}> #${esc(t)}</label> `;
-    }
-
-    const dueVal = task.due ? toDatetimeLocal(task.due) : "";
+    const dueVal = task.due ? toDateValue(task.due) : "";
+    const timeVal = task.due ? toTimeValue(task.due) : "";
 
     container.innerHTML = `
         <div class="task-form" style="margin-top:0.5rem;">
@@ -331,11 +311,13 @@ function showEditForm(task, li) {
             <div class="form-row">
                 <select class="form-select edit-project">${projectOptions}</select>
                 <input class="form-input edit-project-custom" placeholder="new project name..." style="display:none;" />
-                <input class="form-input edit-due" type="datetime-local" value="${dueVal}" />
-            </div>
-            <div class="form-row" style="flex-wrap:wrap;">
-                ${tagCheckboxes}
-                <input class="form-input edit-new-tags" placeholder="new tags..." style="max-width:150px;" />
+                <div class="tag-picker edit-tag-picker">
+                    <div class="tag-chips edit-tag-chips"></div>
+                    <input class="tag-search-input edit-tag-input" placeholder="tags..." autocomplete="off" />
+                    <div class="tag-dropdown edit-tag-dropdown"></div>
+                </div>
+                <input class="form-input edit-due" type="date" value="${dueVal}" />
+                <input class="form-input edit-due-time" type="time" value="${timeVal}" />
             </div>
             <div class="form-actions">
                 <button class="btn-dark edit-save-btn">save</button>
@@ -344,6 +326,14 @@ function showEditForm(task, li) {
         </div>
     `;
     container.style.display = "block";
+
+    // Init tag picker for edit form, pre-populated with task's tags
+    const editTagPicker = createTagPicker(
+        container.querySelector(".edit-tag-chips"),
+        container.querySelector(".edit-tag-input"),
+        container.querySelector(".edit-tag-dropdown"),
+    );
+    editTagPicker.setTags(task.tags || []);
 
     // Show custom project input when "+ new" selected
     const projSel = container.querySelector(".edit-project");
@@ -367,24 +357,20 @@ function showEditForm(task, li) {
         const title = container.querySelector(".edit-title").value.trim();
         const desc = container.querySelector(".edit-description").value.trim();
         const priority = container.querySelector(".edit-priority").value;
-        const due = container.querySelector(".edit-due").value;
+        const dueDate = container.querySelector(".edit-due").value;
+        const dueTime = container.querySelector(".edit-due-time").value;
 
         let project = projSel.value;
         if (project === "__new__") project = projCustom.value.trim();
 
-        // Collect checked tags + new typed tags
-        const checkedTags = Array.from(container.querySelectorAll(".tag-checkbox input:checked"))
-            .map(cb => cb.value);
-        const newTagsStr = container.querySelector(".edit-new-tags").value.trim();
-        const newTags = newTagsStr ? newTagsStr.split(",").map(t => t.trim()).filter(Boolean) : [];
-        const tags = [...new Set([...checkedTags, ...newTags])];
+        const tags = editTagPicker.getSelectedTags();
 
         if (title !== task.title) updates.title = title;
         if (desc !== (task.description || "")) updates.description = desc;
         if (priority !== (task.priority || "")) updates.priority = priority || null;
         if (project !== (task.project || "")) updates.project = project || null;
-        if (due) {
-            updates.due = new Date(due).toISOString();
+        if (dueDate) {
+            updates.due = dueTime ? `${dueDate}T${dueTime}` : dueDate;
         } else if (task.due) {
             updates.due = null;
         }
@@ -398,14 +384,123 @@ function showEditForm(task, li) {
     };
 }
 
-function toDatetimeLocal(isoStr) {
-    // Convert ISO string to datetime-local input value (YYYY-MM-DDTHH:MM)
+function toDateValue(isoStr) {
+    // Convert ISO string to date input value (YYYY-MM-DD)
     try {
         const d = new Date(isoStr);
         const pad = n => String(n).padStart(2, "0");
-        return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+        return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
     } catch (e) { return ""; }
 }
+
+function toTimeValue(isoStr) {
+    // Extract time from ISO string (HH:MM) — returns "" if midnight (date-only due)
+    try {
+        const d = new Date(isoStr);
+        if (d.getHours() === 0 && d.getMinutes() === 0) return "";
+        const pad = n => String(n).padStart(2, "0");
+        return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    } catch (e) { return ""; }
+}
+
+// ---------------------------------------------------------------------------
+// Tag picker — search-to-select with chips
+// ---------------------------------------------------------------------------
+function createTagPicker(chipsEl, inputEl, dropdownEl) {
+    let selected = new Set();
+
+    function renderChips() {
+        chipsEl.innerHTML = "";
+        for (const tag of selected) {
+            const chip = document.createElement("span");
+            chip.className = "tag-chip";
+            chip.innerHTML = `#${esc(tag)} <span class="tag-chip-remove">\u00d7</span>`;
+            chip.querySelector(".tag-chip-remove").addEventListener("click", e => {
+                e.stopPropagation();
+                selected.delete(tag);
+                renderChips();
+            });
+            chipsEl.appendChild(chip);
+        }
+    }
+
+    function showDropdown() {
+        const query = inputEl.value.trim().toLowerCase();
+        const matches = knownTags.filter(t =>
+            !selected.has(t) && t.toLowerCase().includes(query)
+        );
+
+        dropdownEl.innerHTML = "";
+        matches.forEach(t => {
+            const item = document.createElement("div");
+            item.className = "tag-dropdown-item";
+            item.textContent = `#${t}`;
+            item.addEventListener("click", () => {
+                selected.add(t);
+                inputEl.value = "";
+                renderChips();
+                hideDropdown();
+            });
+            dropdownEl.appendChild(item);
+        });
+
+        // Offer to create new tag if query doesn't match existing
+        if (query && !knownTags.includes(query) && !selected.has(query)) {
+            const item = document.createElement("div");
+            item.className = "tag-dropdown-item create-new";
+            item.textContent = `+ create "${query}"`;
+            item.addEventListener("click", () => {
+                selected.add(query);
+                inputEl.value = "";
+                renderChips();
+                hideDropdown();
+            });
+            dropdownEl.appendChild(item);
+        }
+
+        dropdownEl.classList.toggle("visible", dropdownEl.children.length > 0);
+    }
+
+    function hideDropdown() {
+        dropdownEl.classList.remove("visible");
+    }
+
+    inputEl.addEventListener("input", showDropdown);
+    inputEl.addEventListener("focus", showDropdown);
+    inputEl.addEventListener("keydown", e => {
+        if (e.key === "Enter") {
+            e.preventDefault();
+            const query = inputEl.value.trim();
+            if (query) {
+                selected.add(query);
+                inputEl.value = "";
+                renderChips();
+                hideDropdown();
+            }
+        }
+        if (e.key === "Backspace" && !inputEl.value && selected.size > 0) {
+            const tags = [...selected];
+            selected.delete(tags[tags.length - 1]);
+            renderChips();
+        }
+    });
+
+    // Hide dropdown when clicking outside the picker
+    document.addEventListener("click", e => {
+        if (!chipsEl.closest(".tag-picker").contains(e.target)) {
+            hideDropdown();
+        }
+    });
+
+    return {
+        getSelectedTags: () => [...selected],
+        setTags: (tags) => { selected = new Set(tags); renderChips(); },
+        clear: () => { selected.clear(); renderChips(); inputEl.value = ""; },
+    };
+}
+
+// Persistent tag picker instance for the add form
+let addFormTagPicker = null;
 
 // ---------------------------------------------------------------------------
 // Add task form
@@ -417,6 +512,14 @@ function setupAddForm() {
     const cancelBtn = document.getElementById("cancel-task-btn");
     const projectSel = document.getElementById("new-project");
     const projectCustom = document.getElementById("new-project-custom");
+    const prioritySel = document.getElementById("new-priority");
+
+    // Init tag picker for add form
+    addFormTagPicker = createTagPicker(
+        document.getElementById("new-tag-chips"),
+        document.getElementById("new-tag-input"),
+        document.getElementById("new-tag-dropdown"),
+    );
 
     addBtn.addEventListener("click", () => {
         form.style.display = form.style.display === "none" ? "block" : "none";
@@ -436,6 +539,11 @@ function setupAddForm() {
         }
     });
 
+    // Clear required-missing indicator when priority is selected
+    prioritySel.addEventListener("change", () => {
+        prioritySel.classList.remove("required-missing");
+    });
+
     cancelBtn.addEventListener("click", () => {
         form.style.display = "none";
         clearForm();
@@ -445,28 +553,31 @@ function setupAddForm() {
         const title = document.getElementById("new-title").value.trim();
         if (!title) return;
 
-        const body = { title };
+        // Require priority
+        const priority = prioritySel.value;
+        if (!priority) {
+            prioritySel.classList.add("required-missing");
+            prioritySel.focus();
+            return;
+        }
+
+        const body = { title, priority };
         const desc = document.getElementById("new-description").value.trim();
-        const priority = document.getElementById("new-priority").value;
-        const due = document.getElementById("new-due").value;
+        const dueDate = document.getElementById("new-due").value;
+        const dueTime = document.getElementById("new-due-time").value;
 
         // Project: use custom input if "+ new" was selected
         let project = projectSel.value;
         if (project === "__new__") project = projectCustom.value.trim();
         if (project === "") project = null;
 
-        // Tags: merge selected existing tags + typed new tags
-        const selectedTags = Array.from(document.getElementById("new-tags-select").selectedOptions)
-            .map(o => o.value);
-        const typedTags = document.getElementById("new-tags").value.trim();
-        const newTags = typedTags ? typedTags.split(",").map(t => t.trim()).filter(Boolean) : [];
-        const allTagsCombined = [...new Set([...selectedTags, ...newTags])];
+        // Tags from tag picker
+        const tags = addFormTagPicker.getSelectedTags();
 
         if (desc) body.description = desc;
-        if (priority) body.priority = priority;
         if (project) body.project = project;
-        if (allTagsCombined.length) body.tags = allTagsCombined;
-        if (due) body.due = new Date(due).toISOString();
+        if (tags.length) body.tags = tags;
+        if (dueDate) body.due = dueTime ? `${dueDate}T${dueTime}` : dueDate;
 
         await api("POST", "/api/tasks", body);
         form.style.display = "none";
@@ -479,12 +590,13 @@ function clearForm() {
     document.getElementById("new-title").value = "";
     document.getElementById("new-description").value = "";
     document.getElementById("new-priority").value = "";
+    document.getElementById("new-priority").classList.remove("required-missing");
     document.getElementById("new-project").value = "";
     document.getElementById("new-project-custom").value = "";
     document.getElementById("new-project-custom").style.display = "none";
-    document.getElementById("new-tags").value = "";
-    document.getElementById("new-tags-select").selectedIndex = -1;
+    if (addFormTagPicker) addFormTagPicker.clear();
     document.getElementById("new-due").value = "";
+    document.getElementById("new-due-time").value = "";
 }
 
 // ---------------------------------------------------------------------------

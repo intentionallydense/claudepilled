@@ -59,10 +59,13 @@
                     <option value="__new__">+ new project</option>
                 </select>
                 <input id="new-project-custom" class="form-input" placeholder="new project name..." style="display:none;" />
-                <select id="new-tags-select" class="form-select" multiple>
-                </select>
-                <input id="new-tags" class="form-input" placeholder="tags (comma separated)..." />
-                <input id="new-due" class="form-input" type="datetime-local" />
+                <div class="tag-picker" id="new-tag-picker">
+                    <div class="tag-chips" id="new-tag-chips"></div>
+                    <input class="tag-search-input" id="new-tag-input" placeholder="tags..." autocomplete="off" />
+                    <div class="tag-dropdown" id="new-tag-dropdown"></div>
+                </div>
+                <input id="new-due" class="form-input" type="date" />
+                <input id="new-due-time" class="form-input" type="time" placeholder="time" />
             </div>
             <div class="form-actions">
                 <button id="save-task-btn" class="btn-dark">save</button>
