@@ -983,6 +983,13 @@ const BackroomsAdapter = (function () {
             opt.textContent = p.name;
             sel.appendChild(opt);
         }
-        sel.value = selectedId || "";
+        // If no explicit prompt assigned, auto-select the saved "default" prompt
+        // (matches backend resolution in _resolve_prompt)
+        if (!selectedId) {
+            const defaultPrompt = savedPrompts.find(p => p.name.toLowerCase() === "default");
+            sel.value = defaultPrompt ? defaultPrompt.id : "";
+        } else {
+            sel.value = selectedId;
+        }
     }
 })();
