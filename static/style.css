@@ -1453,6 +1453,31 @@ body {
 .speed-btn:hover { border-color: #111; color: #111; }
 .speed-btn.active { background: #111; color: #fff; border-color: #111; }
 
+/* Iteration / step / next-speaker controls */
+.iteration-controls, .step-mode-controls, .next-speaker-controls {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.15rem;
+    margin-left: 0.35rem;
+}
+.control-label {
+    font-size: 0.6rem;
+    color: #888;
+}
+.iteration-select, .next-speaker-select {
+    font-family: inherit;
+    font-size: 0.6rem;
+    border: 1px solid #ddd;
+    color: #555;
+    background: none;
+    padding: 0.1rem 0.2rem;
+    cursor: pointer;
+}
+.iteration-select:hover, .next-speaker-select:hover {
+    border-color: #111;
+    color: #111;
+}
+
 /* Stats display */
 .backrooms-stats {
     border-top: 1px solid #eee;

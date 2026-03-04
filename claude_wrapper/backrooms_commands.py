@@ -12,6 +12,9 @@ Supported commands:
   !vote "question" [opts]  — informational poll (no enforcement)
   !search "query"          — web search via Anthropic API
   !image "description"     — generate image via DALL-E 3
+  !add_ai "model_id"       — invite a new AI participant
+  !remove_ai "label"       — remove a participant (min 2)
+  !list_models             — list available models
 
 Used by: backrooms.py (called after each model response)
 """
@@ -118,6 +121,30 @@ _COMMAND_PATTERNS = [
         "image",
         re.compile(
             r'!image\s+"([^"]+)"',
+            re.IGNORECASE,
+        ),
+    ),
+    # !add_ai "model_id"
+    (
+        "add_ai",
+        re.compile(
+            r'!add_ai\s+"([^"]+)"',
+            re.IGNORECASE,
+        ),
+    ),
+    # !remove_ai "label"
+    (
+        "remove_ai",
+        re.compile(
+            r'!remove_ai\s+"([^"]+)"',
+            re.IGNORECASE,
+        ),
+    ),
+    # !list_models (no args)
+    (
+        "list_models",
+        re.compile(
+            r'!list_models\b',
             re.IGNORECASE,
         ),
     ),
@@ -300,6 +327,54 @@ async def _handle_image(cmd, speaker, state, client):
         return CommandResult(notification=f'[image generation failed: {str(e)[:100]}]')
 
 
+async def _handle_add_ai(cmd, speaker, state, client):
+    """!add_ai "model_id" — invite a new AI to the conversation."""
+    model_id = cmd.args[0] if cmd.args else ""
+    if not model_id:
+        return CommandResult(notification="[add_ai failed: no model specified]")
+    from claude_wrapper.models import AVAILABLE_MODELS, get_model_name
+    # Validate model exists
+    valid = any(m["id"] == model_id for m in AVAILABLE_MODELS)
+    if not valid:
+        return CommandResult(notification=f"[add_ai failed: unknown model '{model_id}']")
+    if len(state.participants) >= 5:
+        return CommandResult(notification="[add_ai failed: maximum 5 participants]")
+    label = _speaker_label(speaker, state)
+    new_label = get_model_name(model_id)
+    return CommandResult(
+        notification=f"[{label} invited {new_label} to the conversation]",
+        side_effects={"add_participant": {"id": model_id}},
+    )
+
+
+async def _handle_remove_ai(cmd, speaker, state, client):
+    """!remove_ai "label" — remove a participant from the conversation."""
+    target_label = cmd.args[0] if cmd.args else ""
+    if not target_label:
+        return CommandResult(notification="[remove_ai failed: no participant specified]")
+    if len(state.participants) <= 2:
+        return CommandResult(notification="[remove_ai failed: minimum 2 participants required]")
+    target_found = any(p["label"] == target_label for p in state.participants)
+    if not target_found:
+        return CommandResult(notification=f"[remove_ai failed: unknown participant '{target_label}']")
+    label = _speaker_label(speaker, state)
+    return CommandResult(
+        notification=f"[{label} removed {target_label} from the conversation]",
+        side_effects={"remove_participant": {"label": target_label}},
+    )
+
+
+async def _handle_list_models(cmd, speaker, state, client):
+    """!list_models — list all available models."""
+    from claude_wrapper.models import get_available_models
+    models = get_available_models()
+    lines = [f"  {m['id']} ({m.get('name', m['id'])})" for m in models[:20]]
+    label = _speaker_label(speaker, state)
+    return CommandResult(
+        notification=f"[available models for {label}]:\n" + "\n".join(lines)
+    )
+
+
 def _speaker_label(speaker: str, state: SessionState) -> str:
     """Get display label for a speaker from session state."""
     for p in state.participants:
@@ -316,4 +391,7 @@ _COMMAND_HANDLERS = {
     "vote": _handle_vote,
     "search": _handle_search,
     "image": _handle_image,
+    "add_ai": _handle_add_ai,
+    "remove_ai": _handle_remove_ai,
+    "list_models": _handle_list_models,
 }

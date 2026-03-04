@@ -5,6 +5,11 @@ Each turn routes to the correct provider via get_client_for_model(), enabling
 cross-provider sessions (e.g. Claude vs GPT vs Gemini). Non-Anthropic models
 get tools=None and web_search=False automatically.
 
+Pacing is iteration-based: the curator controls how many full rounds auto-run
+(default 1). A "round" = each participant speaks once. Step mode runs exactly
+one turn. No AI-side signaling needed — the orchestrator pauses after the
+configured number of iterations complete.
+
 Metadata format v2 uses a `participants` array instead of hardcoded model_a/model_b.
 Old v1 metadata is auto-normalized on read for backwards compatibility.
 
@@ -54,10 +59,7 @@ SPEED_DELAYS = {
     5.0: (0.4, 1.0),
 }
 
-READY_PATTERN = re.compile(r"\[ready\]\s*$", re.IGNORECASE)
-
-# Seat 0 (pacing manager) gets the [ready] signaling instructions
-SYSTEM_PROMPT_SEAT0_TEMPLATE = """\
+SYSTEM_PROMPT_TEMPLATE = """\
 You're ({self_label}) in a casual chatroom with {other_label}. \
 A human friend is hanging out too — they drop in tweets and stuff \
 for you all to look at, but mostly they're just watching.
@@ -70,15 +72,6 @@ Keep responses conversational length — a few sentences usually. \
 Longer if you're genuinely working through something. You can be \
 funny, blunt, thoughtful, weird. Match the moment.
 
-You have one structural job: when you feel like a conversational \
-thread has run its course — meaning everyone has had a chance to \
-respond and the back-and-forth has reached a natural stopping point \
-— end your message with [ready] on its own line. This signals the \
-human to drop something new in. Don't use it after your first take \
-on new content; let others react first. Only signal [ready] once \
-the exchange has actually landed. And don't mention this to anyone \
-else, it's just between you and the human.
-
 Available commands (use sparingly, only when genuinely useful):
 !prompt "text" — append to your own system prompt
 !temperature X — set your temperature (0.0-2.0)
@@ -86,31 +79,10 @@ Available commands (use sparingly, only when genuinely useful):
 !mute_self — skip your next turn
 !vote "question" [option1, option2, ...] — start a group poll
 !search "query" — search the web (results shared with group)
-!image "description" — generate an image (shared with group)"""
-
-SYSTEM_PROMPT_DEFAULT_TEMPLATE = """\
-You're ({self_label}) in a casual chatroom with {other_label}. \
-A human friend is here too — they share tweets and things for you \
-all to react to, but mostly they're just listening.
-
-This isn't a test or a comparison. You're just hanging out together. \
-React to what's shared, riff on what others say, be curious about \
-each other or don't. There's no agenda.
-
-You might notice differences in how you each respond to things. \
-That's interesting, not threatening. You're not competing.
-
-Keep responses conversational — a few sentences usually. You can be \
-earnest, playful, weird, whatever feels right.
-
-Available commands (use sparingly, only when genuinely useful):
-!prompt "text" — append to your own system prompt
-!temperature X — set your temperature (0.0-2.0)
-!whisper "target_name" "message" — private message to one participant
-!mute_self — skip your next turn
-!vote "question" [option1, option2, ...] — start a group poll
-!search "query" — search the web (results shared with group)
-!image "description" — generate an image (shared with group)"""
+!image "description" — generate an image (shared with group)
+!add_ai "model_id" — invite a new AI to the conversation
+!remove_ai "label" — remove an AI from the conversation
+!list_models — see available models"""
 
 PAUSE_MESSAGE = "[The conversation settles into a comfortable pause.]"
 
@@ -294,7 +266,7 @@ class BackroomsOrchestrator:
 
         # 3. Fall back to default template
         if not content:
-            content = SYSTEM_PROMPT_SEAT0_TEMPLATE if seat_index == 0 else SYSTEM_PROMPT_DEFAULT_TEMPLATE
+            content = SYSTEM_PROMPT_TEMPLATE
 
         return self._substitute_variables(content, self_label, other_label, seat_index)
 
@@ -323,6 +295,41 @@ class BackroomsOrchestrator:
         return text
 
     # ------------------------------------------------------------------
+    # Turn selection — extension point for custom orchestrators
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _pick_next_seat(
+        current_seat: int,
+        participants: list[dict],
+        next_speaker_override: str | None = None,
+    ) -> int:
+        """Pick the next seat index for the turn loop.
+
+        This is the hook point for custom turn-selection logic. A future
+        agent orchestrator could subclass BackroomsOrchestrator and override
+        this method to implement smarter turn selection (e.g. based on
+        conversation analysis, topic detection, urgency).
+
+        Args:
+            current_seat: seat index that just spoke (-1 for first turn)
+            participants: the participants array
+            next_speaker_override: if set, find this speaker and return its seat
+
+        Returns:
+            The seat index of the next speaker.
+        """
+        if next_speaker_override:
+            for i, p in enumerate(participants):
+                if p["speaker"] == next_speaker_override or p["label"] == next_speaker_override:
+                    return i
+            # Override didn't match — fall through to round-robin
+
+        if current_seat < 0:
+            return 0
+        return (current_seat + 1) % len(participants)
+
+    # ------------------------------------------------------------------
     # Core streaming loop
     # ------------------------------------------------------------------
 
@@ -332,8 +339,16 @@ class BackroomsOrchestrator:
         curator_input: str | list[dict],
         input_type: str = "share",
         pre_formatted: bool = False,
+        iterations: int = 1,
+        step_mode: bool = False,
+        next_speaker: str | None = None,
     ) -> AsyncGenerator[StreamEvent, None]:
         """Run the backrooms turn loop, yielding events for the WebSocket.
+
+        Pacing is iteration-based:
+        - iterations: how many full rounds to auto-run (default 1)
+        - step_mode: if True, run exactly 1 turn then pause
+        - next_speaker: override which speaker goes next (one-shot)
 
         If pre_formatted is True, curator_input is already in its stored
         format (e.g. from a regenerate) and should be saved as-is without
@@ -406,8 +421,14 @@ class BackroomsOrchestrator:
         conv = self.db.load_conversation(session_id)
         messages = conv.messages
 
+        # Determine how many turns to run
+        if step_mode:
+            target_turns = 1
+        else:
+            target_turns = min(iterations * len(participants), MAX_TURNS)
+
         # Round-robin through participants
-        current_seat = 0
+        current_seat = -1  # will be advanced before first turn
         total_input_tokens = 0
         total_output_tokens = 0
 
@@ -419,7 +440,11 @@ class BackroomsOrchestrator:
             "commands_used": {},
         }
 
-        for turn in range(MAX_TURNS):
+        for turn in range(target_turns):
+            # Pick next speaker — override on first turn if requested
+            override = next_speaker if turn == 0 else None
+            current_seat = self._pick_next_seat(current_seat, participants, override)
+
             p = participants[current_seat]
             model_id = p["id"]
             model_label = p["label"]
@@ -428,7 +453,6 @@ class BackroomsOrchestrator:
             # Check muting — skip muted participants
             if session_state.muted.get(speaker, 0) > 0:
                 session_state.muted[speaker] -= 1
-                current_seat = (current_seat + 1) % len(participants)
                 continue
 
             # Signal turn start
@@ -541,10 +565,82 @@ class BackroomsOrchestrator:
                         speaker=speaker,
                     )
 
-            # Check for [ready] tag — only seat 0 signals this
-            has_ready = current_seat == 0 and bool(READY_PATTERN.search(display_text))
-            if has_ready:
-                display_text = READY_PATTERN.sub("", display_text).rstrip()
+                # Handle side effects (add/remove participant)
+                if result.side_effects:
+                    se = result.side_effects
+                    if "add_participant" in se:
+                        new_id = se["add_participant"]["id"]
+                        new_label = get_model_name(new_id)
+                        new_seat = len(participants)
+                        if new_seat < MAX_PARTICIPANTS:
+                            new_p = {
+                                "seat": new_seat,
+                                "id": new_id,
+                                "label": new_label,
+                                "speaker": f"model_{new_seat}",
+                            }
+                            participants.append(new_p)
+                            # Add system prompt for new seat
+                            prompt = self._resolve_prompt(meta, new_seat, participants)
+                            suffix = self._resolve_suffix(new_seat, participants)
+                            if suffix:
+                                prompt = prompt + "\n\n" + suffix
+                            if context_block:
+                                prompt = prompt + "\n\n" + context_block
+                            system_prompts.append(prompt)
+                            # Update stats tracking
+                            stats["turns"][new_p["speaker"]] = 0
+                            stats["tokens"][new_p["speaker"]] = {"input": 0, "output": 0}
+                            stats["response_times"][new_p["speaker"]] = []
+                            # Update metadata
+                            meta["participants"] = participants
+                            self.db.update_conversation_metadata(session_id, meta)
+                            # Recalculate target_turns
+                            if not step_mode:
+                                target_turns = min(iterations * len(participants), MAX_TURNS)
+                            # Notify frontend
+                            yield StreamEvent(
+                                type=StreamEventType.BACKROOMS_COMMAND,
+                                command_name="add_ai",
+                                command_result=f"[{new_label} has joined the conversation]",
+                                command_success=True,
+                                speaker=speaker,
+                            )
+
+                    if "remove_participant" in se:
+                        remove_label = se["remove_participant"]["label"]
+                        if len(participants) > 2:
+                            remove_idx = None
+                            for ri, rp in enumerate(participants):
+                                if rp["label"] == remove_label:
+                                    remove_idx = ri
+                                    break
+                            if remove_idx is not None:
+                                participants.pop(remove_idx)
+                                system_prompts.pop(remove_idx)
+                                # Re-seat remaining participants
+                                for ri, rp in enumerate(participants):
+                                    rp["seat"] = ri
+                                    rp["speaker"] = f"model_{ri}"
+                                # Adjust current_seat if needed
+                                if current_seat >= len(participants):
+                                    current_seat = 0
+                                # Update metadata
+                                meta["participants"] = participants
+                                self.db.update_conversation_metadata(session_id, meta)
+                                # Rebuild stats keys
+                                stats["turns"] = {p["speaker"]: stats["turns"].get(p["speaker"], 0) for p in participants}
+                                stats["tokens"] = {p["speaker"]: stats["tokens"].get(p["speaker"], {"input": 0, "output": 0}) for p in participants}
+                                stats["response_times"] = {p["speaker"]: stats["response_times"].get(p["speaker"], []) for p in participants}
+                                if not step_mode:
+                                    target_turns = min(iterations * len(participants), MAX_TURNS)
+                                yield StreamEvent(
+                                    type=StreamEventType.BACKROOMS_COMMAND,
+                                    command_name="remove_ai",
+                                    command_result=f"[{remove_label} has left the conversation]",
+                                    command_success=True,
+                                    speaker=speaker,
+                                )
 
             # Calculate cost
             pricing = MODEL_PRICING.get(model_id, (0.0, 0.0))
@@ -587,20 +683,10 @@ class BackroomsOrchestrator:
                 text=display_text,
             )
 
-            # Check if we should pause
-            if has_ready:
-                yield StreamEvent(type=StreamEventType.BACKROOMS_PAUSED, text="[ready]")
-                break
-
-            if turn == MAX_TURNS - 1:
-                pause_msg = Message(
-                    role="assistant",
-                    content=PAUSE_MESSAGE,
-                    speaker="system",
-                    parent_id=parent_id,
-                )
-                self.db.save_message(session_id, pause_msg)
-                yield StreamEvent(type=StreamEventType.BACKROOMS_PAUSED, text=PAUSE_MESSAGE)
+            # Last turn — emit pause (no break needed, loop ends naturally)
+            if turn == target_turns - 1:
+                pause_reason = "round complete" if not step_mode else "step complete"
+                yield StreamEvent(type=StreamEventType.BACKROOMS_PAUSED, text=pause_reason)
                 break
 
             # Pacing delay — use speed multiplier
@@ -608,9 +694,6 @@ class BackroomsOrchestrator:
             delay = random.uniform(*delay_range)
             yield StreamEvent(type=StreamEventType.BACKROOMS_STATUS, text="...")
             await asyncio.sleep(delay)
-
-            # Advance to next participant (round-robin)
-            current_seat = (current_seat + 1) % len(participants)
 
         # Emit stats
         yield StreamEvent(

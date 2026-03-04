@@ -19,6 +19,9 @@ const BackroomsAdapter = (function () {
     let messagesEl = null;
     let savedPrompts = [];
     let currentSpeed = 1.0;
+    let currentIterations = 1;
+    let currentStepMode = false;
+    let currentNextSpeaker = null;
 
     // Streaming state (adapter manages its own since turn_start/turn_end
     // don't map to chat-core's single-assistant-message lifecycle)
@@ -300,6 +303,108 @@ const BackroomsAdapter = (function () {
     }
 
     // -----------------------------------------------------------------------
+    // Iteration count control
+    // -----------------------------------------------------------------------
+    function renderIterationControls() {
+        let container = document.getElementById("iteration-controls");
+        if (!container) {
+            container = document.createElement("span");
+            container.id = "iteration-controls";
+            container.className = "iteration-controls";
+            const speedEl = document.getElementById("speed-controls");
+            if (speedEl && speedEl.parentElement) {
+                speedEl.parentElement.insertBefore(container, speedEl.nextSibling);
+            }
+        }
+        container.innerHTML = "";
+        const label = document.createElement("span");
+        label.className = "control-label";
+        label.textContent = "rounds:";
+        container.appendChild(label);
+        const sel = document.createElement("select");
+        sel.className = "iteration-select";
+        for (let i = 1; i <= 10; i++) {
+            const opt = document.createElement("option");
+            opt.value = i;
+            opt.textContent = i;
+            if (i === currentIterations) opt.selected = true;
+            sel.appendChild(opt);
+        }
+        sel.onchange = () => {
+            currentIterations = parseInt(sel.value, 10);
+            chatCoreRef?.sendRaw({ action: "set_iterations", iterations: currentIterations });
+        };
+        container.appendChild(sel);
+    }
+
+    // -----------------------------------------------------------------------
+    // Step mode toggle
+    // -----------------------------------------------------------------------
+    function renderStepModeToggle() {
+        let container = document.getElementById("step-mode-controls");
+        if (!container) {
+            container = document.createElement("span");
+            container.id = "step-mode-controls";
+            container.className = "step-mode-controls";
+            const iterEl = document.getElementById("iteration-controls");
+            if (iterEl && iterEl.parentElement) {
+                iterEl.parentElement.insertBefore(container, iterEl.nextSibling);
+            }
+        }
+        container.innerHTML = "";
+        const btn = document.createElement("button");
+        btn.className = "speed-btn" + (currentStepMode ? " active" : "");
+        btn.textContent = "step";
+        btn.title = "Step mode: advance one turn at a time";
+        btn.onclick = () => {
+            currentStepMode = !currentStepMode;
+            chatCoreRef?.sendRaw({ action: "set_step_mode", step_mode: currentStepMode });
+            renderStepModeToggle();
+        };
+        container.appendChild(btn);
+    }
+
+    // -----------------------------------------------------------------------
+    // Next-turn override
+    // -----------------------------------------------------------------------
+    function renderNextSpeakerControl() {
+        let container = document.getElementById("next-speaker-controls");
+        if (!container) {
+            container = document.createElement("span");
+            container.id = "next-speaker-controls";
+            container.className = "next-speaker-controls";
+            const stepEl = document.getElementById("step-mode-controls");
+            if (stepEl && stepEl.parentElement) {
+                stepEl.parentElement.insertBefore(container, stepEl.nextSibling);
+            }
+        }
+        container.innerHTML = "";
+        const label = document.createElement("span");
+        label.className = "control-label";
+        label.textContent = "next:";
+        container.appendChild(label);
+        const sel = document.createElement("select");
+        sel.className = "next-speaker-select";
+        const autoOpt = document.createElement("option");
+        autoOpt.value = "";
+        autoOpt.textContent = "auto";
+        sel.appendChild(autoOpt);
+        const parts = getParticipants();
+        for (const p of parts) {
+            const opt = document.createElement("option");
+            opt.value = p.speaker;
+            opt.textContent = p.label;
+            sel.appendChild(opt);
+        }
+        sel.value = currentNextSpeaker || "";
+        sel.onchange = () => {
+            currentNextSpeaker = sel.value || null;
+            chatCoreRef?.sendRaw({ action: "set_next_speaker", speaker: currentNextSpeaker });
+        };
+        container.appendChild(sel);
+    }
+
+    // -----------------------------------------------------------------------
     // Stats display
     // -----------------------------------------------------------------------
     function renderStats(stats) {
@@ -363,6 +468,9 @@ const BackroomsAdapter = (function () {
             modelNamesEl = elements.modelNames;
             messagesEl = elements.messages;
             currentSpeed = meta?.speed || 1.0;
+            currentIterations = meta?.iterations || 1;
+            currentStepMode = meta?.step_mode || false;
+            currentNextSpeaker = null;
         },
 
         /** Set the chatCore reference after it's created. */
@@ -374,8 +482,13 @@ const BackroomsAdapter = (function () {
         /** Get participants array. */
         getParticipants,
 
-        /** Render speed controls after chatCore is ready. */
-        renderSpeedControls,
+        /** Render all pacing controls after chatCore is ready. */
+        renderSpeedControls() {
+            renderSpeedControls();
+            renderIterationControls();
+            renderStepModeToggle();
+            renderNextSpeakerControl();
+        },
 
         /**
          * Returns chat-core config overrides for backrooms mode.
@@ -444,17 +557,35 @@ const BackroomsAdapter = (function () {
                         case "backrooms_paused": {
                             addSpacer();
                             const pauseEl = createSpeakerMessageEl("system", "");
-                            const pauseText = (event.text === "[ready]") ? "waiting for something new..." : event.text;
-                            pauseEl.querySelector(".message-text").textContent = pauseText;
+                            pauseEl.querySelector(".message-text").textContent = "waiting for something new...";
                             messagesEl.appendChild(pauseEl);
                             maybeScroll();
                             if (statusEl) statusEl.textContent = "ready for more";
+                            // Reset next-speaker override after each run
+                            currentNextSpeaker = null;
+                            const nsSel = document.querySelector(".next-speaker-select");
+                            if (nsSel) nsSel.value = "";
                             return true;
                         }
 
                         case "speed_updated":
                             currentSpeed = event.speed || 1.0;
                             renderSpeedControls();
+                            return true;
+
+                        case "iterations_updated":
+                            currentIterations = event.iterations || 1;
+                            renderIterationControls();
+                            return true;
+
+                        case "step_mode_updated":
+                            currentStepMode = !!event.step_mode;
+                            renderStepModeToggle();
+                            return true;
+
+                        case "next_speaker_updated":
+                            currentNextSpeaker = event.speaker || null;
+                            renderNextSpeakerControl();
                             return true;
 
                         case "message_done":
@@ -659,8 +790,7 @@ const BackroomsAdapter = (function () {
             for (const p of parts) {
                 const label = document.createElement("label");
                 label.className = "form-label dynamic-seat";
-                const seatDesc = p.seat === 0 ? " (manages pacing)" : "";
-                label.textContent = `${p.label} (seat ${p.seat + 1}${seatDesc})`;
+                label.textContent = `${p.label} (seat ${p.seat + 1})`;
 
                 const sel = document.createElement("select");
                 sel.className = "form-select dynamic-seat";

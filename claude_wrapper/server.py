@@ -657,6 +657,37 @@ async def websocket_backrooms(ws: WebSocket, session_id: str):
                 await ws.send_text(json.dumps({"type": "speed_updated", "speed": speed}))
                 continue
 
+            # Handle iteration count control
+            if action == "set_iterations":
+                iterations = payload.get("iterations", 1)
+                try:
+                    iterations = max(1, min(10, int(iterations)))
+                except (ValueError, TypeError):
+                    iterations = 1
+                meta = backrooms.db.get_conversation_metadata(session_id) or {}
+                meta["iterations"] = iterations
+                backrooms.db.update_conversation_metadata(session_id, meta)
+                await ws.send_text(json.dumps({"type": "iterations_updated", "iterations": iterations}))
+                continue
+
+            # Handle step mode toggle
+            if action == "set_step_mode":
+                step_mode = bool(payload.get("step_mode", False))
+                meta = backrooms.db.get_conversation_metadata(session_id) or {}
+                meta["step_mode"] = step_mode
+                backrooms.db.update_conversation_metadata(session_id, meta)
+                await ws.send_text(json.dumps({"type": "step_mode_updated", "step_mode": step_mode}))
+                continue
+
+            # Handle next-speaker override (one-shot, stored in memory not DB)
+            if action == "set_next_speaker":
+                next_speaker = payload.get("speaker", None)
+                meta = backrooms.db.get_conversation_metadata(session_id) or {}
+                meta["next_speaker"] = next_speaker
+                backrooms.db.update_conversation_metadata(session_id, meta)
+                await ws.send_text(json.dumps({"type": "next_speaker_updated", "speaker": next_speaker}))
+                continue
+
             # Handle tag injection (shared helper)
             inject_tags = payload.get("inject_tags", [])
             await _handle_tag_injection(ws, session_id, inject_tags)
@@ -717,9 +748,24 @@ async def websocket_backrooms(ws: WebSocket, session_id: str):
             if not has_content:
                 continue
 
+            # Read pacing params from session metadata
+            pacing_meta = backrooms.db.get_conversation_metadata(session_id) or {}
+            br_iterations = pacing_meta.get("iterations", 1)
+            br_step_mode = pacing_meta.get("step_mode", False)
+            br_next_speaker = pacing_meta.pop("next_speaker", None)
+            # Clear next_speaker after reading (one-shot)
+            if br_next_speaker:
+                backrooms.db.update_conversation_metadata(session_id, pacing_meta)
+
             # Run stream in background task so it completes even if WS drops
             queue: asyncio.Queue = asyncio.Queue()
-            gen = backrooms.stream_turns(session_id, content, input_type, pre_formatted=pre_formatted)
+            gen = backrooms.stream_turns(
+                session_id, content, input_type,
+                pre_formatted=pre_formatted,
+                iterations=br_iterations,
+                step_mode=br_step_mode,
+                next_speaker=br_next_speaker,
+            )
             task = asyncio.create_task(
                 _run_stream_to_completion(
                     gen, queue, _active_backrooms_tasks, session_id,
