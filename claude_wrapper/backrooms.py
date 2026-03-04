@@ -237,7 +237,7 @@ class BackroomsOrchestrator:
         """Resolve the system prompt for a seat.
 
         Priority: prompt_ids[seat] → legacy prompt_id_a/b → legacy system_prompt_a/b
-                  → default template.
+                  → saved backrooms prompt named "default" → hardcoded template.
         """
         self_label = participants[seat_index]["label"]
         other_labels = [p["label"] for i, p in enumerate(participants) if i != seat_index]
@@ -265,7 +265,14 @@ class BackroomsOrchestrator:
             if legacy_key:
                 content = meta.get(legacy_key)
 
-        # 3. Fall back to default template
+        # 3. Try saved backrooms prompt named "default"
+        if not content:
+            for p in self.db.list_prompts(category="backrooms"):
+                if p["name"].lower() == "default":
+                    content = p["content"]
+                    break
+
+        # 4. Fall back to hardcoded template
         if not content:
             content = SYSTEM_PROMPT_TEMPLATE
 
