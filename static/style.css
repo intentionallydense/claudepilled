@@ -56,7 +56,7 @@ body {
 
 /* Sidebar search */
 .sidebar-search-container {
-    padding: 0.5rem 1rem 0;
+    padding: 1rem 1rem 0;
 }
 .sidebar-search {
     width: 100%;
@@ -1333,6 +1333,168 @@ body {
     z-index: 99;
 }
 .sidebar-backdrop.open { display: block; }
+
+/* ------------------------------------------------------------------ */
+/* Backrooms-specific styles (model names, speaker dimming, prompts)   */
+/* ------------------------------------------------------------------ */
+.model-names {
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: #111;
+}
+.model-names.clickable {
+    cursor: pointer;
+    text-decoration-color: #ccc;
+    text-underline-offset: 3px;
+}
+.model-names.clickable:hover {
+    text-decoration: underline;
+    text-decoration-color: #888;
+}
+
+.status-indicator {
+    font-size: 0.7rem;
+    color: #888;
+    font-style: italic;
+}
+
+.message.speaker-curator .role-label {
+    color: #aaa;
+    font-style: italic;
+}
+.message.speaker-system .role-label {
+    color: #ccc;
+    font-style: italic;
+}
+.message.speaker-curator .message-text {
+    color: #888;
+    font-style: italic;
+}
+.message.speaker-system .message-text {
+    color: #aaa;
+    font-style: italic;
+    text-align: center;
+}
+
+.modal-wide { width: 440px; }
+.prompt-actions {
+    display: flex;
+    gap: 0.75rem;
+    align-items: center;
+    margin-top: 0.25rem;
+}
+.prompt-actions .btn-dark {
+    width: auto;
+    padding: 0.5rem 1.5rem;
+}
+.prompt-hint {
+    font-size: 0.7rem;
+    color: #aaa;
+    margin-top: -0.5rem;
+    margin-bottom: 1rem;
+    line-height: 1.4;
+}
+.save-status {
+    font-size: 0.7rem;
+    color: #888;
+}
+
+/* N-participant speaker colors — model_0 through model_4 */
+.message.speaker-model_0 .role-label { color: #c05621; }
+.message.speaker-model_1 .role-label { color: #2b6cb0; }
+.message.speaker-model_2 .role-label { color: #276749; }
+.message.speaker-model_3 .role-label { color: #6b46c1; }
+.message.speaker-model_4 .role-label { color: #c53030; }
+/* Legacy speaker names (backwards compat with old sessions) */
+.message.speaker-model_a .role-label { color: #c05621; }
+.message.speaker-model_b .role-label { color: #2b6cb0; }
+
+/* Whisper messages — muted italic style */
+.message.speaker-whisper .message-text {
+    color: #999;
+    font-style: italic;
+}
+.message.speaker-whisper .role-label {
+    color: #bbb;
+    font-style: italic;
+}
+.message.speaker-whisper::before {
+    content: "";
+    display: block;
+    border-top: 1px dashed #ddd;
+    margin-bottom: 0.25rem;
+}
+
+/* Command notification messages */
+.message.speaker-command .message-text {
+    color: #666;
+    font-size: 0.8rem;
+    font-style: italic;
+    background: #f8f8f8;
+    padding: 0.35rem 0.5rem;
+    border-left: 2px solid #ddd;
+}
+
+/* Speed control buttons */
+.speed-controls {
+    display: inline-flex;
+    gap: 0.15rem;
+    margin-left: 0.35rem;
+}
+.speed-btn {
+    background: none;
+    border: 1px solid #ddd;
+    color: #888;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 0.6rem;
+    padding: 0.1rem 0.3rem;
+}
+.speed-btn:hover { border-color: #111; color: #111; }
+.speed-btn.active { background: #111; color: #fff; border-color: #111; }
+
+/* Stats display */
+.backrooms-stats {
+    border-top: 1px solid #eee;
+    padding: 0 1.5rem;
+    font-size: 0.7rem;
+    color: #888;
+    max-width: 700px;
+    margin: 0 auto;
+}
+.backrooms-stats.collapsed .stats-body { display: none; }
+.stats-toggle {
+    cursor: pointer;
+    padding: 0.35rem 0;
+    user-select: none;
+}
+.stats-toggle:hover { color: #111; }
+.stats-body { padding: 0 0 0.5rem; }
+.stats-row { padding: 0.15rem 0; }
+.stats-row strong { color: #555; }
+
+/* Participant rows in new session modal */
+.participant-row { margin-bottom: 0.5rem; }
+.participant-row-inner {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+}
+.participant-row-inner .form-select { flex: 1; }
+.participant-remove {
+    font-size: 1rem;
+    color: #ccc;
+    flex-shrink: 0;
+}
+.participant-remove:hover { color: #c00; }
+
+/* Backrooms type indicator in sidebar */
+.conv-type-label {
+    font-size: 0.55rem;
+    color: #aaa;
+    margin-left: 0.25rem;
+    flex-shrink: 0;
+}
 
 /* ------------------------------------------------------------------ */
 /* Mobile layout (max-width: 768px)                                    */

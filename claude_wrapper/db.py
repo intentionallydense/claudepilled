@@ -129,6 +129,21 @@ class Database:
 
         conn.commit()
 
+        # Data migrations — rename couch → backrooms
+        conn.execute("UPDATE conversations SET type = 'backrooms' WHERE type = 'couch'")
+        conn.execute("UPDATE prompts SET category = 'backrooms' WHERE category = 'couch'")
+        conn.commit()
+
+        # Migrate couch setting keys → backrooms (one-time, idempotent)
+        for seat in ("1", "2"):
+            old_key = f"couch_seat_{seat}_suffix"
+            new_key = f"backrooms_seat_{seat}_suffix"
+            old_val = conn.execute("SELECT value FROM settings WHERE key = ?", (old_key,)).fetchone()
+            new_val = conn.execute("SELECT value FROM settings WHERE key = ?", (new_key,)).fetchone()
+            if old_val and not new_val:
+                conn.execute("INSERT INTO settings (key, value) VALUES (?, ?)", (new_key, old_val["value"]))
+        conn.commit()
+
         # Backfill parent_id for existing messages that lack them
         self._backfill_parent_ids(conn)
 
@@ -232,9 +247,9 @@ class Database:
         conn = self._connect()
         rows = conn.execute(
             """SELECT id, title, model, created_at, updated_at,
-                      total_input_tokens, total_output_tokens, total_cost
+                      total_input_tokens, total_output_tokens, total_cost,
+                      COALESCE(type, 'chat') as type, metadata
                FROM conversations
-               WHERE COALESCE(type, 'chat') = 'chat'
                ORDER BY updated_at DESC"""
         ).fetchall()
         conn.close()
@@ -635,7 +650,7 @@ class Database:
                       c.title
                FROM messages m
                JOIN conversations c ON c.id = m.conversation_id
-               WHERE COALESCE(c.type, 'chat') = 'chat'
+               WHERE COALESCE(c.type, 'chat') IN ('chat', 'backrooms')
                  AND m.content LIKE ?
                ORDER BY m.created_at DESC
                LIMIT ?""",

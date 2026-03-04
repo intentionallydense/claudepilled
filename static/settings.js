@@ -6,7 +6,7 @@ const universalPromptSelect = document.getElementById("universal-prompt-select")
 const form = document.getElementById("settings-form");
 const saveStatus = document.getElementById("save-status");
 const promptsList = document.getElementById("prompts-list");
-const couchPromptsList = document.getElementById("couch-prompts-list");
+const backroomsPromptsList = document.getElementById("backrooms-prompts-list");
 
 // ---------------------------------------------------------------------------
 // Load models into select
@@ -65,8 +65,8 @@ async function loadSettings() {
     if (settings.universal_prompt_id) universalPromptSelect.value = settings.universal_prompt_id;
     const suffix1 = document.getElementById("seat-1-suffix");
     const suffix2 = document.getElementById("seat-2-suffix");
-    if (suffix1 && settings.couch_seat_1_suffix) suffix1.value = settings.couch_seat_1_suffix;
-    if (suffix2 && settings.couch_seat_2_suffix) suffix2.value = settings.couch_seat_2_suffix;
+    if (suffix1 && settings.backrooms_seat_1_suffix) suffix1.value = settings.backrooms_seat_1_suffix;
+    if (suffix2 && settings.backrooms_seat_2_suffix) suffix2.value = settings.backrooms_seat_2_suffix;
 }
 
 // ---------------------------------------------------------------------------
@@ -87,7 +87,7 @@ async function saveSettings(e) {
 }
 
 // ---------------------------------------------------------------------------
-// Prompts library — shared renderer for both chat and couch sections
+// Prompts library — shared renderer for both chat and backrooms sections
 // ---------------------------------------------------------------------------
 function renderPromptList(listEl, prompts, category) {
     listEl.innerHTML = "";
@@ -139,12 +139,12 @@ function renderPromptList(listEl, prompts, category) {
 }
 
 async function loadAllPrompts() {
-    const [chatPrompts, couchPrompts] = await Promise.all([
+    const [chatPrompts, backroomsPrompts] = await Promise.all([
         fetch("/api/prompts?category=chat").then(r => r.json()),
-        fetch("/api/prompts?category=couch").then(r => r.json()),
+        fetch("/api/prompts?category=backrooms").then(r => r.json()),
     ]);
     renderPromptList(promptsList, chatPrompts, "chat");
-    renderPromptList(couchPromptsList, couchPrompts, "couch");
+    renderPromptList(backroomsPromptsList, backroomsPrompts, "backrooms");
     // Keep universal prompt dropdown in sync with chat prompts
     const currentVal = universalPromptSelect.value;
     await loadUniversalPromptOptions();
@@ -197,8 +197,8 @@ function startPromptEdit(listEl, id, prompt, category) {
 }
 
 async function addPrompt(category) {
-    const nameEl = document.getElementById(category === "couch" ? "new-couch-prompt-name" : "new-prompt-name");
-    const contentEl = document.getElementById(category === "couch" ? "new-couch-prompt-content" : "new-prompt-content");
+    const nameEl = document.getElementById(category === "backrooms" ? "new-backrooms-prompt-name" : "new-prompt-name");
+    const contentEl = document.getElementById(category === "backrooms" ? "new-backrooms-prompt-content" : "new-prompt-content");
     const name = nameEl.value.trim();
     const content = contentEl.value;
     if (!name) return;
@@ -224,8 +224,8 @@ async function saveSuffixes() {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-            couch_seat_1_suffix: suffix1,
-            couch_seat_2_suffix: suffix2,
+            backrooms_seat_1_suffix: suffix1,
+            backrooms_seat_2_suffix: suffix2,
         }),
     });
     if (statusEl) {
@@ -239,6 +239,6 @@ async function saveSuffixes() {
 // ---------------------------------------------------------------------------
 form.addEventListener("submit", saveSettings);
 document.getElementById("add-prompt-btn").onclick = () => addPrompt("chat");
-document.getElementById("add-couch-prompt-btn").onclick = () => addPrompt("couch");
+document.getElementById("add-backrooms-prompt-btn").onclick = () => addPrompt("backrooms");
 document.getElementById("save-suffixes-btn").onclick = saveSuffixes;
 Promise.all([loadModels(), loadUniversalPromptOptions(), loadAllPrompts()]).then(loadSettings);

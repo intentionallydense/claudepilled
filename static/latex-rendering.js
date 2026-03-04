@@ -1,7 +1,7 @@
 /**
  * LaTeX rendering utilities — pre/post-process pattern for marked.js.
  *
- * Used by: app.js, couch.js, briefing.js (chat panel).
+ * Used by: app.js, backrooms-adapter.js, briefing.js (chat panel).
  *
  * Problem: marked.js interprets $, _, * inside LaTeX as markdown.
  * Solution: extract LaTeX before marked, replace with <span data-latex>

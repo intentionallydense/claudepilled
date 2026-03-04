@@ -19,7 +19,7 @@ from pydantic import BaseModel
 
 from claude_wrapper.client import ClaudeClient
 from claude_wrapper.conversation import ConversationManager
-from claude_wrapper.couch import CouchOrchestrator
+from claude_wrapper.backrooms import BackroomsOrchestrator
 from claude_wrapper.db import Database
 from claude_wrapper.models import AVAILABLE_MODELS, StreamEventType, get_available_models, get_available_providers
 from claude_wrapper.briefing_db import BriefingDatabase
@@ -61,7 +61,7 @@ app.include_router(email_router)
 # Globals — initialized in lifespan
 # ---------------------------------------------------------------------------
 manager: ConversationManager | None = None
-couch: CouchOrchestrator | None = None
+backrooms: BackroomsOrchestrator | None = None
 file_db_instance: FileDatabase | None = None
 pin_db_instance: PinDatabase | None = None
 _static_dir = Path(__file__).resolve().parent.parent / "static"
@@ -85,7 +85,7 @@ def _load_example_tools() -> ToolRegistry:
 
 @app.on_event("startup")
 async def startup():
-    global manager, couch, file_db_instance, pin_db_instance
+    global manager, backrooms, file_db_instance, pin_db_instance
     api_key = os.environ.get("ANTHROPIC_API_KEY", "")
     if not api_key:
         print("WARNING: ANTHROPIC_API_KEY not set. Set it in .env or environment.")
@@ -106,7 +106,7 @@ async def startup():
     init_all_series(briefing_db)
     manager = ConversationManager(client=client, tool_registry=registry, db=db, file_db=file_db_instance, pin_db=pin_db_instance)
     init_briefing_routes(briefing_db, task_db, client, manager)
-    couch = CouchOrchestrator(client=client, db=db, file_db=file_db_instance, pin_db=pin_db_instance)
+    backrooms = BackroomsOrchestrator(client=client, db=db, file_db=file_db_instance, pin_db=pin_db_instance)
 
     # Migrate old setting key → new name (one-time, idempotent)
     old_val = db.get_setting("default_system_prompt")
@@ -204,6 +204,14 @@ async def get_conversation(conversation_id: str):
     data = conv.model_dump(mode="json")
     meta = manager.db.get_conversation_metadata(conversation_id)
     data["_compactions"] = (meta or {}).get("compactions", [])
+    # Include type and metadata for backrooms sessions
+    conn = manager.db._connect()
+    type_row = conn.execute("SELECT type, metadata FROM conversations WHERE id = ?", (conversation_id,)).fetchone()
+    conn.close()
+    if type_row:
+        data["type"] = type_row["type"] or "chat"
+        if type_row["metadata"]:
+            data["_metadata"] = json.loads(type_row["metadata"])
     return data
 
 
@@ -264,7 +272,28 @@ async def list_tools():
 # the WebSocket disconnects mid-stream.  The WS handler reads from a Queue.
 
 _active_chat_tasks: dict[str, asyncio.Task] = {}
-_active_couch_tasks: dict[str, asyncio.Task] = {}
+_active_backrooms_tasks: dict[str, asyncio.Task] = {}
+
+
+async def _handle_tag_injection(ws: WebSocket, conversation_id: str, inject_tags: list[str]) -> None:
+    """Resolve tags to files/pins and emit context_update. Shared by chat and backrooms WS handlers."""
+    if not inject_tags:
+        return
+    if file_db_instance:
+        matched_files = file_db_instance.get_files_by_tags(inject_tags)
+        if matched_files:
+            new_ids = [f["id"] for f in matched_files]
+            file_db_instance.add_active_file_ids(conversation_id, new_ids)
+    if pin_db_instance:
+        matched_pins = pin_db_instance.get_pins_by_tags(inject_tags)
+        if matched_pins:
+            new_pin_ids = [p["id"] for p in matched_pins]
+            pin_db_instance.add_active_pin_ids(conversation_id, new_pin_ids)
+    context_data = _build_context_response(conversation_id)
+    await ws.send_text(json.dumps({
+        "type": StreamEventType.CONTEXT_UPDATE.value,
+        **context_data,
+    }))
 
 
 async def _run_stream_to_completion(
@@ -310,25 +339,7 @@ async def websocket_chat(ws: WebSocket, conversation_id: str):
             inject_tags = payload.get("inject_tags", [])
 
             # Handle tag injection before processing the message
-            if inject_tags:
-                # Resolve files by tags
-                if file_db_instance:
-                    matched_files = file_db_instance.get_files_by_tags(inject_tags)
-                    if matched_files:
-                        new_ids = [f["id"] for f in matched_files]
-                        file_db_instance.add_active_file_ids(conversation_id, new_ids)
-                # Resolve pins by tags
-                if pin_db_instance:
-                    matched_pins = pin_db_instance.get_pins_by_tags(inject_tags)
-                    if matched_pins:
-                        new_pin_ids = [p["id"] for p in matched_pins]
-                        pin_db_instance.add_active_pin_ids(conversation_id, new_pin_ids)
-                # Emit unified context_update event
-                context_data = _build_context_response(conversation_id)
-                await ws.send_text(json.dumps({
-                    "type": StreamEventType.CONTEXT_UPDATE.value,
-                    **context_data,
-                }))
+            await _handle_tag_injection(ws, conversation_id, inject_tags)
 
             # Tag-only messages (no text content, just tags): activate context and skip chat
             if not user_text and inject_tags:
@@ -410,7 +421,7 @@ async def get_settings():
 
 @app.put("/api/settings")
 async def put_settings(body: dict):
-    allowed = {"universal_prompt", "universal_prompt_id", "default_model", "couch_seat_1_suffix", "couch_seat_2_suffix", "email_ingestion_prompt_id"}
+    allowed = {"universal_prompt", "universal_prompt_id", "default_model", "backrooms_seat_1_suffix", "backrooms_seat_2_suffix", "backrooms_seat_3_suffix", "backrooms_seat_4_suffix", "backrooms_seat_5_suffix", "email_ingestion_prompt_id"}
     for key, value in body.items():
         if key in allowed:
             manager.db.set_setting(key, value)
@@ -479,101 +490,150 @@ async def briefing_page():
 
 
 # ---------------------------------------------------------------------------
-# Couch page route
+# Backrooms page redirect (legacy /couch URL)
 # ---------------------------------------------------------------------------
+
+from fastapi.responses import RedirectResponse
 
 @app.get("/couch")
-async def couch_page():
-    return FileResponse(str(_static_dir / "couch.html"))
+async def couch_redirect():
+    return RedirectResponse(url="/")
 
 
 # ---------------------------------------------------------------------------
-# Couch REST endpoints
+# Backrooms REST endpoints
 # ---------------------------------------------------------------------------
 
-class CreateCouchSessionRequest(BaseModel):
+class CreateBackroomsSessionRequest(BaseModel):
+    # v2: list of model IDs (2-5 participants)
+    participants: list[str] | None = None
+    # v1 compat: two-model shorthand
     model_a: str = "claude-opus-4-6"
     model_b: str = "claude-3-opus-20240229"
 
 
-@app.get("/api/couch/sessions")
-async def list_couch_sessions():
-    return couch.list_sessions()
+@app.get("/api/backrooms/sessions")
+async def list_backrooms_sessions():
+    return backrooms.list_sessions()
 
 
-@app.post("/api/couch/sessions")
-async def create_couch_session(req: CreateCouchSessionRequest):
-    return couch.create_session(model_a_id=req.model_a, model_b_id=req.model_b)
+@app.post("/api/backrooms/sessions")
+async def create_backrooms_session(req: CreateBackroomsSessionRequest):
+    if req.participants:
+        parts = [{"id": mid} for mid in req.participants]
+        return backrooms.create_session(participants=parts)
+    return backrooms.create_session(model_a_id=req.model_a, model_b_id=req.model_b)
 
 
-@app.get("/api/couch/sessions/{session_id}")
-async def get_couch_session(session_id: str):
-    conv = couch.get_session(session_id)
+@app.get("/api/backrooms/sessions/{session_id}")
+async def get_backrooms_session(session_id: str):
+    conv = backrooms.get_session(session_id)
     if conv is None:
         return JSONResponse(status_code=404, content={"error": "Not found"})
     return conv.model_dump(mode="json")
 
 
-@app.delete("/api/couch/sessions/{session_id}")
-async def delete_couch_session(session_id: str):
-    couch.delete_session(session_id)
+@app.delete("/api/backrooms/sessions/{session_id}")
+async def delete_backrooms_session(session_id: str):
+    backrooms.delete_session(session_id)
     return {"ok": True}
 
 
-@app.get("/api/couch/sessions/{session_id}/cost")
-async def get_couch_session_cost(session_id: str):
-    return couch.get_cost(session_id)
+@app.get("/api/backrooms/sessions/{session_id}/cost")
+async def get_backrooms_session_cost(session_id: str):
+    return backrooms.get_cost(session_id)
 
 
-@app.get("/api/couch/sessions/{session_id}/prompts")
-async def get_couch_prompts(session_id: str):
-    """Get prompt IDs for a couch session. Prompt resolution happens at stream time."""
-    meta = couch.db.get_conversation_metadata(session_id)
+@app.get("/api/backrooms/sessions/{session_id}/prompts")
+async def get_backrooms_prompts(session_id: str):
+    """Get prompt IDs for a backrooms session. Supports both v1 (a/b) and v2 (seat indices)."""
+    meta = backrooms.db.get_conversation_metadata(session_id)
     if meta is None:
         return JSONResponse(status_code=404, content={"error": "Not found"})
+    # Return v2 format (prompt_ids dict) plus v1 compat
+    from claude_wrapper.backrooms import _normalize_metadata
+    normalized = _normalize_metadata(meta)
+    prompt_ids = normalized.get("prompt_ids", {})
     return {
-        "prompt_id_a": meta.get("prompt_id_a"),
-        "prompt_id_b": meta.get("prompt_id_b"),
+        "prompt_ids": prompt_ids,
+        # v1 compat
+        "prompt_id_a": prompt_ids.get("0") or meta.get("prompt_id_a"),
+        "prompt_id_b": prompt_ids.get("1") or meta.get("prompt_id_b"),
     }
 
 
-class UpdateCouchPromptsRequest(BaseModel):
+class UpdateBackroomsPromptsRequest(BaseModel):
+    # v2: dict of seat_index → prompt_id
+    prompt_ids: dict[str, str] | None = None
+    # v1 compat
     prompt_a: str | None = None
     prompt_b: str | None = None
     prompt_id_a: str | None = None
     prompt_id_b: str | None = None
 
 
-@app.patch("/api/couch/sessions/{session_id}/prompts")
-async def update_couch_prompts(session_id: str, req: UpdateCouchPromptsRequest):
-    """Update prompt selection for a couch session. Empty string resets to default.
-    When a prompt_id is set, clears any legacy baked system_prompt for that seat."""
-    meta = couch.db.get_conversation_metadata(session_id)
+@app.patch("/api/backrooms/sessions/{session_id}/prompts")
+async def update_backrooms_prompts(session_id: str, req: UpdateBackroomsPromptsRequest):
+    """Update prompt selection for a backrooms session. Empty string resets to default."""
+    meta = backrooms.db.get_conversation_metadata(session_id)
     if meta is None:
         return JSONResponse(status_code=404, content={"error": "Not found"})
+
+    # Handle v2 format (seat indices)
+    if req.prompt_ids is not None:
+        if "prompt_ids" not in meta:
+            meta["prompt_ids"] = {}
+        for seat_idx, pid in req.prompt_ids.items():
+            meta["prompt_ids"][seat_idx] = pid if pid else None
+            # Also update v1 compat fields for old sessions
+            legacy_key = {"0": "prompt_id_a", "1": "prompt_id_b"}.get(seat_idx)
+            if legacy_key:
+                meta[legacy_key] = pid if pid else None
+                if pid:
+                    legacy_prompt_key = {"0": "system_prompt_a", "1": "system_prompt_b"}.get(seat_idx)
+                    if legacy_prompt_key:
+                        meta.pop(legacy_prompt_key, None)
+
+    # Handle v1 compat fields
     if req.prompt_a is not None:
         meta["system_prompt_a"] = req.prompt_a if req.prompt_a else None
     if req.prompt_b is not None:
         meta["system_prompt_b"] = req.prompt_b if req.prompt_b else None
     if req.prompt_id_a is not None:
         meta["prompt_id_a"] = req.prompt_id_a if req.prompt_id_a else None
-        # Clear legacy baked content when selecting a saved prompt
         if req.prompt_id_a:
             meta.pop("system_prompt_a", None)
+        # Sync to v2
+        if "prompt_ids" not in meta:
+            meta["prompt_ids"] = {}
+        meta["prompt_ids"]["0"] = req.prompt_id_a if req.prompt_id_a else None
     if req.prompt_id_b is not None:
         meta["prompt_id_b"] = req.prompt_id_b if req.prompt_id_b else None
         if req.prompt_id_b:
             meta.pop("system_prompt_b", None)
-    couch.db.update_conversation_metadata(session_id, meta)
+        if "prompt_ids" not in meta:
+            meta["prompt_ids"] = {}
+        meta["prompt_ids"]["1"] = req.prompt_id_b if req.prompt_id_b else None
+
+    backrooms.db.update_conversation_metadata(session_id, meta)
     return {"ok": True}
 
 
+@app.get("/api/backrooms/sessions/{session_id}/stats")
+async def get_backrooms_stats(session_id: str):
+    """Get stats for a backrooms session from metadata."""
+    meta = backrooms.db.get_conversation_metadata(session_id)
+    if meta is None:
+        return JSONResponse(status_code=404, content={"error": "Not found"})
+    return meta.get("last_stats", {})
+
+
 # ---------------------------------------------------------------------------
-# Couch WebSocket
+# Backrooms WebSocket
 # ---------------------------------------------------------------------------
 
-@app.websocket("/api/couch/{session_id}")
-async def websocket_couch(ws: WebSocket, session_id: str):
+@app.websocket("/api/backrooms/{session_id}")
+async def websocket_backrooms(ws: WebSocket, session_id: str):
     await ws.accept()
     try:
         while True:
@@ -582,24 +642,24 @@ async def websocket_couch(ws: WebSocket, session_id: str):
             action = payload.get("action")
             pre_formatted = False
 
-            # Handle tag injection (same logic as chat WS)
+            # Handle speed control action
+            if action == "set_speed":
+                speed = payload.get("speed", 1.0)
+                try:
+                    speed = float(speed)
+                    if speed not in (0.5, 1.0, 2.0, 5.0):
+                        speed = 1.0
+                except (ValueError, TypeError):
+                    speed = 1.0
+                meta = backrooms.db.get_conversation_metadata(session_id) or {}
+                meta["speed"] = speed
+                backrooms.db.update_conversation_metadata(session_id, meta)
+                await ws.send_text(json.dumps({"type": "speed_updated", "speed": speed}))
+                continue
+
+            # Handle tag injection (shared helper)
             inject_tags = payload.get("inject_tags", [])
-            if inject_tags:
-                if file_db_instance:
-                    matched_files = file_db_instance.get_files_by_tags(inject_tags)
-                    if matched_files:
-                        new_ids = [f["id"] for f in matched_files]
-                        file_db_instance.add_active_file_ids(session_id, new_ids)
-                if pin_db_instance:
-                    matched_pins = pin_db_instance.get_pins_by_tags(inject_tags)
-                    if matched_pins:
-                        new_pin_ids = [p["id"] for p in matched_pins]
-                        pin_db_instance.add_active_pin_ids(session_id, new_pin_ids)
-                context_data = _build_context_response(session_id)
-                await ws.send_text(json.dumps({
-                    "type": StreamEventType.CONTEXT_UPDATE.value,
-                    **context_data,
-                }))
+            await _handle_tag_injection(ws, session_id, inject_tags)
 
             # Tag-only message: activate context and skip chat
             content_for_check = payload.get("content", "")
@@ -619,7 +679,7 @@ async def websocket_couch(ws: WebSocket, session_id: str):
             if action == "edit":
                 parent_id = payload.get("parent_id")
                 if parent_id:
-                    couch.db.set_current_leaf(session_id, parent_id)
+                    backrooms.db.set_current_leaf(session_id, parent_id)
                 content = payload.get("content", "")
                 input_type = payload.get("type", "share")
             # Regenerate: re-run from a curator message's starting point
@@ -627,12 +687,12 @@ async def websocket_couch(ws: WebSocket, session_id: str):
                 curator_msg_id = payload.get("curator_msg_id")
                 if not curator_msg_id:
                     continue
-                regen_msg = couch.db.get_message(curator_msg_id)
+                regen_msg = backrooms.db.get_message(curator_msg_id)
                 if not regen_msg:
                     continue
                 # Reset leaf to the curator message's parent (before it was sent)
                 if regen_msg.parent_id:
-                    couch.db.set_current_leaf(session_id, regen_msg.parent_id)
+                    backrooms.db.set_current_leaf(session_id, regen_msg.parent_id)
                 # Re-send with the original stored content (already formatted)
                 # Convert ContentBlock list to dicts for stream_turns
                 if isinstance(regen_msg.content, list):
@@ -659,13 +719,13 @@ async def websocket_couch(ws: WebSocket, session_id: str):
 
             # Run stream in background task so it completes even if WS drops
             queue: asyncio.Queue = asyncio.Queue()
-            gen = couch.stream_turns(session_id, content, input_type, pre_formatted=pre_formatted)
+            gen = backrooms.stream_turns(session_id, content, input_type, pre_formatted=pre_formatted)
             task = asyncio.create_task(
                 _run_stream_to_completion(
-                    gen, queue, _active_couch_tasks, session_id,
+                    gen, queue, _active_backrooms_tasks, session_id,
                 )
             )
-            _active_couch_tasks[session_id] = task
+            _active_backrooms_tasks[session_id] = task
 
             while True:
                 event_data = await queue.get()

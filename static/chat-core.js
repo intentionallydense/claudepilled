@@ -118,7 +118,7 @@ function removeStreamingCursor(el) {
 }
 
 // ---------------------------------------------------------------------------
-// buildTreeLayout — standalone tree renderer shared by chat-core and couch.
+// buildTreeLayout — standalone tree renderer shared by chat-core and backrooms.
 // Takes tree data + a container element, renders SVG connections + node dots.
 // Returns { treeNodes, childrenMap, parentMap } for caller to use.
 //
@@ -463,7 +463,8 @@ function createChatCore(config) {
     async function fetchAndUpdateCost() {
         if (!conversationId) return;
         try {
-            const data = await apiFetch("GET", `/api/conversations/${conversationId}/cost`);
+            const costPrefix = config.costUrlPrefix || "/api/conversations/";
+            const data = await apiFetch("GET", `${costPrefix}${conversationId}/cost`);
             updateCostDisplay(data.input_tokens, data.output_tokens, data.cost,
                 data.cache_creation_tokens, data.cache_read_tokens);
         } catch (e) { /* ignore */ }
@@ -480,7 +481,8 @@ function createChatCore(config) {
         wsIntentionallyClosed = false;
         if (ws) { wsIntentionallyClosed = true; ws.close(); ws = null; wsIntentionallyClosed = false; }
         const proto = location.protocol === "https:" ? "wss:" : "ws:";
-        ws = new WebSocket(`${proto}//${location.host}/api/chat/${convId}`);
+        const wsPrefix = config.wsUrlPrefix || "/api/chat/";
+        ws = new WebSocket(`${proto}//${location.host}${wsPrefix}${convId}`);
         ws.onopen = () => {};
         ws.onclose = () => {
             ws = null;
@@ -557,6 +559,9 @@ function createChatCore(config) {
     // Stream event handler
     // -----------------------------------------------------------------------
     function handleStreamEvent(event) {
+        // Let page-specific handler intercept events (return true to skip default)
+        if (config.onStreamEvent && config.onStreamEvent(event)) return;
+
         switch (event.type) {
             case "thinking_delta":
                 if (!streamingEl) startStreamingMessage();
@@ -1737,6 +1742,7 @@ function createChatCore(config) {
         renderMessage,
         renderConversationMessages,
         createMessageEl,
+        startStreamingMessage,
         appendAssistantContent,
 
         loadTree,

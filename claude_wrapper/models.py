@@ -151,6 +151,14 @@ def get_api_model_id(model_id: str) -> str:
     return model_id
 
 
+def get_model_name(model_id: str) -> str:
+    """Return the display name for a model ID. Falls back to model_id."""
+    for m in AVAILABLE_MODELS:
+        if m["id"] == model_id:
+            return m["name"]
+    return model_id
+
+
 def get_available_providers() -> dict[str, bool]:
     """Return which providers have API keys configured."""
     result = {}
@@ -293,10 +301,12 @@ class StreamEventType(str, Enum):
     TITLE_UPDATE = "title_update"
     MESSAGE_DONE = "message_done"
     ERROR = "error"
-    COUCH_TURN_START = "couch_turn_start"
-    COUCH_TURN_END = "couch_turn_end"
-    COUCH_PAUSED = "couch_paused"
-    COUCH_STATUS = "couch_status"
+    BACKROOMS_TURN_START = "backrooms_turn_start"
+    BACKROOMS_TURN_END = "backrooms_turn_end"
+    BACKROOMS_PAUSED = "backrooms_paused"
+    BACKROOMS_STATUS = "backrooms_status"
+    BACKROOMS_COMMAND = "backrooms_command"
+    BACKROOMS_STATS = "backrooms_stats"
     CONTEXT_UPDATE = "context_update"
 
 
@@ -322,9 +332,16 @@ class StreamEvent(BaseModel):
     cache_read_input_tokens: int | None = None
     # For error
     error: str | None = None
-    # For couch events
+    # For backrooms events
     model_label: str | None = None  # "Opus 4.6" or "3 Opus"
     model_id: str | None = None
+    speaker: str | None = None  # "model_0", "model_1", etc.
+    # For backrooms_command events
+    command_name: str | None = None
+    command_result: str | None = None
+    command_success: bool | None = None
+    # For backrooms_stats events
+    stats: dict[str, Any] | None = None
 
     def to_ws_json(self) -> dict[str, Any]:
         """Serialize for WebSocket transmission."""

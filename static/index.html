@@ -23,7 +23,7 @@
                 <nav class="sidebar-nav">
                     <a href="/briefing" class="text-btn">briefing</a>
                     <a href="/tasks" class="text-btn">tasks</a>
-                    <a href="/couch" class="text-btn">couch</a>
+                    <a id="new-backrooms-btn" class="text-btn" href="#">backrooms</a>
                     <a href="/settings" class="text-btn">settings</a>
                 </nav>
             </div>
@@ -68,6 +68,9 @@
                             <input type="checkbox" id="thinking-checkbox">
                             <span>thinking</span>
                         </label>
+                        <!-- Backrooms-only elements (hidden in chat mode) -->
+                        <span id="model-names" class="model-names clickable" style="display:none;" title="edit system prompts"></span>
+                        <span id="status-indicator" class="status-indicator" style="display:none;">ready</span>
                         <span id="cost-display" class="cost-display"></span>
                         <button id="compact-btn" class="text-btn compact-btn" style="display:none;">compact</button>
                         <span id="input-status" class="input-status"></span>
@@ -104,6 +107,42 @@
             </div>
         </aside>
 
+        <!-- Backrooms: prompts modal -->
+        <div id="backrooms-prompts-modal" class="modal" style="display:none;">
+            <div class="modal-content modal-wide">
+                <div class="modal-header">
+                    <span class="modal-title">system prompts</span>
+                    <button class="modal-close" id="br-prompts-modal-close">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <label class="form-label" id="br-prompt-a-label">seat 1</label>
+                    <select id="br-prompt-a-select" class="form-select"></select>
+                    <label class="form-label" id="br-prompt-b-label">seat 2</label>
+                    <select id="br-prompt-b-select" class="form-select"></select>
+                    <p class="prompt-hint">prompts support variables: {self_label}, {other_label}, {all_labels}, {seat_number}</p>
+                    <div class="prompt-actions">
+                        <button id="br-save-prompts-btn" class="btn-dark">save</button>
+                        <button id="br-reset-prompts-btn" class="text-btn">reset to defaults</button>
+                        <span id="br-prompts-save-status" class="save-status"></span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Backrooms: new session modal (N participants) -->
+        <div id="new-session-modal" class="modal" style="display:none;">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <span class="modal-title">new backrooms session</span>
+                    <button class="modal-close" id="new-session-modal-close">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div id="participant-rows"></div>
+                    <button id="add-participant-btn" class="text-btn" style="margin: 0.5rem 0;">+ add participant</button>
+                    <button id="create-session-btn" class="btn-dark">start session</button>
+                </div>
+            </div>
+        </div>
     </div>
 
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.21/dist/katex.min.css">
@@ -111,8 +150,9 @@
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/dompurify/dist/purify.min.js"></script>
     <script src="/latex-rendering.js"></script>
-    <script src="/chat-core.js?v=1"></script>
-    <script src="/app.js?v=26"></script>
+    <script src="/chat-core.js?v=2"></script>
+    <script src="/backrooms-adapter.js?v=1"></script>
+    <script src="/app.js?v=27"></script>
     <script>if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js");</script>
 </body>
 </html>

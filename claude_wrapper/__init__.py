@@ -3,6 +3,6 @@
 from claude_wrapper.client import ClaudeClient
 from claude_wrapper.tools import ToolRegistry
 from claude_wrapper.conversation import ConversationManager
-from claude_wrapper.couch import CouchOrchestrator
+from claude_wrapper.backrooms import BackroomsOrchestrator
 
-__all__ = ["ClaudeClient", "ToolRegistry", "ConversationManager", "CouchOrchestrator"]
+__all__ = ["ClaudeClient", "ToolRegistry", "ConversationManager", "BackroomsOrchestrator"]

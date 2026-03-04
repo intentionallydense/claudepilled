@@ -5,7 +5,7 @@ the entry point for multi-provider routing — it returns either a ClaudeClient
 or an OpenAICompatibleClient based on the model's provider, with per-provider
 caching so we don't create duplicate SDK instances.
 
-Used by: conversation.py, couch.py, server.py
+Used by: conversation.py, backrooms.py, server.py
 """
 
 from __future__ import annotations
@@ -127,9 +127,12 @@ class ClaudeClient:
         thinking_budget: int | None = None,
         web_search: bool = True,
         max_retries: int = 3,
+        temperature: float | None = None,
     ) -> AsyncGenerator[StreamEvent, None]:
         """Stream a response, yielding StreamEvents. Retries on overloaded/5xx."""
         kwargs = self._build_kwargs(messages, tools, model, max_tokens, system, thinking_budget, web_search=web_search)
+        if temperature is not None:
+            kwargs["temperature"] = temperature
 
         last_exc = None
         for attempt in range(max_retries):

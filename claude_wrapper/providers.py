@@ -3,9 +3,9 @@
 All five providers expose OpenAI-compatible APIs, so one `openai` SDK client
 handles them all by varying base_url and api_key. This module translates
 OpenAI streaming events into the same StreamEvent types that ClaudeClient emits,
-so conversation.py and couch.py can route between providers transparently.
+so conversation.py and backrooms.py can route between providers transparently.
 
-Used by: client.py (get_client_for_model factory), conversation.py, couch.py
+Used by: client.py (get_client_for_model factory), conversation.py, backrooms.py
 """
 
 from __future__ import annotations
@@ -59,10 +59,13 @@ class OpenAICompatibleClient:
         thinking_budget: int | None = None,
         web_search: bool = False,
         max_retries: int = 3,
+        temperature: float | None = None,
     ) -> AsyncGenerator[StreamEvent, None]:
         """Stream a response, yielding StreamEvents. Retries on overloaded/5xx."""
         api_messages = self._build_messages(messages, system)
         kwargs = self._build_kwargs(api_messages, model, max_tokens, thinking_budget, tools)
+        if temperature is not None:
+            kwargs["temperature"] = temperature
 
         last_exc = None
         for attempt in range(max_retries):

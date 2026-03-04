@@ -2,12 +2,18 @@
 // app.js — Main chat page. Uses createChatCore() from chat-core.js for all
 // chat functionality (streaming, tree, rendering). This file handles
 // page-specific concerns: sidebar, moodboard, files, prompts, context bar.
+//
+// Supports two modes: "chat" (normal Claude conversations) and "backrooms"
+// (two-model sessions). Mode switching destroys/recreates the chatCore
+// instance with appropriate config. BackroomsAdapter (backrooms-adapter.js)
+// provides config overrides for backrooms mode.
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
 // State (page-specific only — chat state lives in chatCore)
 // ---------------------------------------------------------------------------
 let currentModel = null;
+let currentMode = "chat"; // "chat" or "backrooms"
 let savedPrompts = [];
 let allTags = [];
 let activeContext = { files: [], pins: [], total_tokens: 0 };
@@ -48,6 +54,11 @@ const costDisplay = document.getElementById("cost-display");
 const nodeMap = document.getElementById("node-map");
 const treeSearch = document.getElementById("tree-search");
 
+// DOM elements — backrooms-specific
+const modelNamesEl = document.getElementById("model-names");
+const statusIndicator = document.getElementById("status-indicator");
+const newBackroomsBtn = document.getElementById("new-backrooms-btn");
+
 // ---------------------------------------------------------------------------
 // API helper
 // ---------------------------------------------------------------------------
@@ -70,113 +81,183 @@ async function apiFetch(method, path, body) {
 }
 
 // ---------------------------------------------------------------------------
-// Chat core instance
+// Chat core instance — mutable for mode switching
 // ---------------------------------------------------------------------------
-const chatCore = createChatCore({
-    elements: {
+let chatCore = null;
+
+/** Shared chatCore callbacks used in both modes. */
+function getSharedCallbacks() {
+    return {
+        onTitleUpdate(title) {
+            const convId = chatCore?.getConversationId();
+            if (!convId) return;
+            const activeItem = conversationList.querySelector(`li[data-id="${convId}"] span`);
+            if (activeItem) activeItem.textContent = title;
+        },
+        onUsageEvent(event) {
+            lastUsageEvent = event;
+        },
+        onContextUpdate(data) {
+            activeContext = {
+                files: data.files || [],
+                pins: data.pins || [],
+                total_tokens: data.total_tokens || 0,
+            };
+            renderContextBar();
+        },
+        onMessageDone() {
+            loadConversations();
+        },
+        onEditDone() {
+            const id = chatCore?.getConversationId();
+            if (id) openConversation(id);
+        },
+        onCompactionDone() {
+            const id = chatCore?.getConversationId();
+            if (id) openConversation(id);
+        },
+    };
+}
+
+/** Create a chatCore instance for normal chat mode. */
+function createChatCoreForChat() {
+    return createChatCore({
+        elements: {
+            messages: messagesEl,
+            input: messageInput,
+            sendBtn,
+            stopBtn,
+            modelSelect,
+            thinkingCheckbox,
+            costDisplay,
+            nodeMap,
+            treeSearch,
+        },
+        apiFetch,
+        ...getSharedCallbacks(),
+
+        createMessageActions(role, actionsEl, msgId, parentId) {
+            if (role === "assistant") {
+                const copyBtn = document.createElement("button");
+                copyBtn.className = "msg-action-btn";
+                copyBtn.textContent = "copy";
+                copyBtn.onclick = () => {
+                    const msgEl = copyBtn.closest(".message");
+                    copyMessageText(msgEl);
+                };
+                actionsEl.appendChild(copyBtn);
+
+                const regenBtn = document.createElement("button");
+                regenBtn.className = "msg-action-btn";
+                regenBtn.textContent = "regenerate";
+                regenBtn.onclick = () => {
+                    const msgEl = regenBtn.closest(".message");
+                    regenerateResponse(msgEl);
+                };
+                actionsEl.appendChild(regenBtn);
+            }
+
+            const pinBtn = document.createElement("button");
+            pinBtn.className = "msg-action-btn";
+            pinBtn.textContent = "pin";
+            pinBtn.onclick = () => {
+                const msgEl = pinBtn.closest(".message");
+                pinMessage(msgEl);
+            };
+            actionsEl.appendChild(pinBtn);
+        },
+
+        buildSendPayload(rawText, images) {
+            const tagRegex = /#([a-zA-Z0-9-]+)/g;
+            const extractedTags = [];
+            let match;
+            while ((match = tagRegex.exec(rawText)) !== null) {
+                extractedTags.push(match[1].toLowerCase());
+            }
+            const text = rawText.replace(/#[a-zA-Z0-9-]+/g, "").trim();
+
+            let messagePayload;
+            if (images.length > 0) {
+                const blocks = [];
+                if (text) blocks.push({ type: "text", text });
+                blocks.push(...images);
+                messagePayload = blocks;
+            } else {
+                messagePayload = text;
+            }
+
+            const payload = { message: messagePayload, _displayText: text };
+            if (extractedTags.length > 0) {
+                payload.inject_tags = extractedTags;
+            }
+            return payload;
+        },
+    });
+}
+
+/** Create a chatCore instance for backrooms mode. */
+function createChatCoreForBackrooms() {
+    const adapterConfig = BackroomsAdapter.getChatCoreConfig();
+    const cc = createChatCore({
+        elements: {
+            messages: messagesEl,
+            input: messageInput,
+            sendBtn,
+            stopBtn,
+            modelSelect: null, // no model select in backrooms
+            thinkingCheckbox: null,
+            costDisplay,
+            nodeMap,
+            treeSearch,
+        },
+        apiFetch,
+        ...getSharedCallbacks(),
+        ...adapterConfig,
+    });
+    BackroomsAdapter.setChatCore(cc);
+    return cc;
+}
+
+// ---------------------------------------------------------------------------
+// Mode switching
+// ---------------------------------------------------------------------------
+function setChatMode() {
+    if (currentMode === "chat") return;
+    currentMode = "chat";
+    if (chatCore) { chatCore.destroy(); }
+    chatCore = createChatCoreForChat();
+    chatCore.attachListeners();
+    chatCore.loadModels();
+    updateModeUI();
+}
+
+function setBackroomsMode(meta) {
+    currentMode = "backrooms";
+    if (chatCore) { chatCore.destroy(); }
+    BackroomsAdapter.init(meta, {
+        statusIndicator,
+        modelNames: modelNamesEl,
         messages: messagesEl,
-        input: messageInput,
-        sendBtn,
-        stopBtn,
-        modelSelect,
-        thinkingCheckbox,
-        costDisplay,
-        nodeMap,
-        treeSearch,
-    },
-    apiFetch,
+    });
+    chatCore = createChatCoreForBackrooms();
+    chatCore.attachListeners();
+    // No model loading needed — backrooms doesn't use model select
+    updateModeUI();
+}
 
-    onTitleUpdate(title) {
-        const activeItem = conversationList.querySelector(`li[data-id="${chatCore.getConversationId()}"] span`);
-        if (activeItem) activeItem.textContent = title;
-    },
-
-    onUsageEvent(event) {
-        lastUsageEvent = event;
-    },
-
-    onContextUpdate(data) {
-        activeContext = {
-            files: data.files || [],
-            pins: data.pins || [],
-            total_tokens: data.total_tokens || 0,
-        };
-        renderContextBar();
-    },
-
-    onMessageDone() {
-        loadConversations();
-    },
-
-    onEditDone() {
-        const id = chatCore.getConversationId();
-        if (id) openConversation(id);
-    },
-
-    onCompactionDone() {
-        // Reload conversation to re-render with compaction dividers
-        const id = chatCore.getConversationId();
-        if (id) openConversation(id);
-    },
-
-    createMessageActions(role, actionsEl, msgId, parentId) {
-        if (role === "assistant") {
-            const copyBtn = document.createElement("button");
-            copyBtn.className = "msg-action-btn";
-            copyBtn.textContent = "copy";
-            copyBtn.onclick = () => {
-                const msgEl = copyBtn.closest(".message");
-                copyMessageText(msgEl);
-            };
-            actionsEl.appendChild(copyBtn);
-
-            const regenBtn = document.createElement("button");
-            regenBtn.className = "msg-action-btn";
-            regenBtn.textContent = "regenerate";
-            regenBtn.onclick = () => {
-                const msgEl = regenBtn.closest(".message");
-                regenerateResponse(msgEl);
-            };
-            actionsEl.appendChild(regenBtn);
-        }
-
-        const pinBtn = document.createElement("button");
-        pinBtn.className = "msg-action-btn";
-        pinBtn.textContent = "pin";
-        pinBtn.onclick = () => {
-            const msgEl = pinBtn.closest(".message");
-            pinMessage(msgEl);
-        };
-        actionsEl.appendChild(pinBtn);
-    },
-
-    buildSendPayload(rawText, images) {
-        // Extract #tags from message
-        const tagRegex = /#([a-zA-Z0-9-]+)/g;
-        const extractedTags = [];
-        let match;
-        while ((match = tagRegex.exec(rawText)) !== null) {
-            extractedTags.push(match[1].toLowerCase());
-        }
-        const text = rawText.replace(/#[a-zA-Z0-9-]+/g, "").trim();
-
-        let messagePayload;
-        if (images.length > 0) {
-            const blocks = [];
-            if (text) blocks.push({ type: "text", text });
-            blocks.push(...images);
-            messagePayload = blocks;
-        } else {
-            messagePayload = text;
-        }
-
-        const payload = { message: messagePayload, _displayText: text };
-        if (extractedTags.length > 0) {
-            payload.inject_tags = extractedTags;
-        }
-        return payload;
-    },
-});
+function updateModeUI() {
+    const isBackrooms = currentMode === "backrooms";
+    // Chat-only elements
+    if (modelSelect) modelSelect.style.display = isBackrooms ? "none" : "";
+    if (promptSelect) promptSelect.style.display = isBackrooms ? "none" : "";
+    if (thinkingCheckbox) thinkingCheckbox.parentElement.style.display = isBackrooms ? "none" : "";
+    if (compactBtn) compactBtn.style.display = isBackrooms ? "none" : (compactBtn.dataset.show ? "" : "none");
+    // Backrooms-only elements
+    if (modelNamesEl) modelNamesEl.style.display = isBackrooms ? "" : "none";
+    if (statusIndicator) statusIndicator.style.display = isBackrooms ? "" : "none";
+    // Stop button not used in backrooms
+    if (stopBtn) stopBtn.style.display = "none";
+}
 
 // ---------------------------------------------------------------------------
 // Prompts
@@ -210,7 +291,9 @@ async function loadConversations() {
     for (const c of convs) {
         const li = document.createElement("li");
         li.dataset.id = c.id;
-        if (c.id === chatCore.getConversationId()) li.classList.add("active");
+        li.dataset.type = c.type || "chat";
+        const activeId = chatCore?.getConversationId();
+        if (c.id === activeId) li.classList.add("active");
 
         const title = document.createElement("span");
         title.textContent = c.title;
@@ -220,13 +303,24 @@ async function loadConversations() {
         title.style.flex = "1";
         li.appendChild(title);
 
+        // Type indicator for backrooms sessions
+        if (c.type === "backrooms") {
+            const typeLabel = document.createElement("span");
+            typeLabel.className = "conv-type-label";
+            typeLabel.textContent = "br";
+            li.appendChild(typeLabel);
+        }
+
         const del = document.createElement("button");
         del.className = "delete-btn";
         del.textContent = "\u00d7";
         del.onclick = async (e) => {
             e.stopPropagation();
-            await api(`/conversations/${c.id}`, { method: "DELETE" });
-            if (chatCore.getConversationId() === c.id) {
+            const delPath = c.type === "backrooms"
+                ? `/backrooms/sessions/${c.id}`
+                : `/conversations/${c.id}`;
+            await api(delPath, { method: "DELETE" });
+            if (chatCore?.getConversationId() === c.id) {
                 chatCore.destroy();
                 showWelcome();
             }
@@ -234,7 +328,7 @@ async function loadConversations() {
         };
         li.appendChild(del);
 
-        li.onclick = () => { openConversation(c.id); toggleSidebar(false); };
+        li.onclick = () => { openConversation(c.id, c.type || "chat"); toggleSidebar(false); };
         conversationList.appendChild(li);
     }
 }
@@ -246,13 +340,19 @@ async function quickCreateConversation() {
             body: JSON.stringify({ title: "New conversation" }),
         });
         await loadConversations();
-        await openConversation(conv.id);
+        await openConversation(conv.id, "chat");
     } catch (e) {
         console.error("Failed to create conversation:", e);
     }
 }
 
-async function openConversation(id) {
+async function openConversation(id, type) {
+    // Determine type if not provided
+    if (!type) {
+        const li = conversationList.querySelector(`li[data-id="${id}"]`);
+        type = li?.dataset?.type || "chat";
+    }
+
     // Highlight active in sidebar
     document.querySelectorAll("#conversation-list li").forEach((li) => {
         li.classList.toggle("active", li.dataset.id === id);
@@ -263,22 +363,70 @@ async function openConversation(id) {
     messagesEl.style.display = "flex";
     inputArea.style.display = "block";
 
-    // Load conversation through chatCore
-    const conv = await chatCore.loadConversation(id);
+    if (type === "backrooms") {
+        await openBackroomsSession(id);
+    } else {
+        await openChatConversation(id);
+    }
+}
 
-    // Set model + prompt
+async function openChatConversation(id) {
+    if (currentMode !== "chat") setChatMode();
+
+    const conv = await chatCore.loadConversation(id);
     currentModel = conv.model;
     populatePromptSelect(conv.prompt_id || "");
 
-    // Show compact button if enough messages
     if (compactBtn) {
-        compactBtn.style.display = (conv.messages || []).length >= 10 ? "" : "none";
+        const showCompact = (conv.messages || []).length >= 10;
+        compactBtn.style.display = showCompact ? "" : "none";
+        compactBtn.dataset.show = showCompact ? "1" : "";
         compactBtn.textContent = "compact";
         compactBtn.disabled = false;
     }
 
-    // Load context
     await loadContext();
+}
+
+async function openBackroomsSession(id) {
+    // Fetch session metadata first (need model info for adapter init)
+    let meta = {};
+    try {
+        const convData = await apiFetch("GET", `/api/conversations/${id}`);
+        if (convData._metadata) meta = convData._metadata;
+    } catch (e) { /* proceed without metadata */ }
+
+    // Switch mode (this destroys/recreates chatCore)
+    if (currentMode !== "backrooms") {
+        setBackroomsMode(meta);
+    } else {
+        // Already in backrooms mode — just update adapter metadata
+        BackroomsAdapter.init(meta, {
+            statusIndicator,
+            modelNames: modelNamesEl,
+            messages: messagesEl,
+        });
+        BackroomsAdapter.setChatCore(chatCore);
+    }
+
+    // Update model names label — join all participant labels
+    const parts = BackroomsAdapter.getParticipants();
+    if (modelNamesEl) {
+        modelNamesEl.textContent = parts.map(p => p.label).join(" / ");
+    }
+
+    // Load conversation data through chatCore (uses backrooms WS/cost URLs)
+    const conv = await chatCore.loadConversation(id);
+
+    // Re-render messages with speaker labels
+    BackroomsAdapter.renderMessages(conv.messages || []);
+
+    // Hide compact button in backrooms
+    if (compactBtn) { compactBtn.style.display = "none"; compactBtn.dataset.show = ""; }
+
+    await loadContext();
+    await BackroomsAdapter.loadPrompts();
+    BackroomsAdapter.renderSpeedControls();
 }
 
 function showWelcome() {
@@ -286,7 +434,7 @@ function showWelcome() {
     messagesEl.style.display = "none";
     inputArea.style.display = "none";
     if (compactBtn) compactBtn.style.display = "none";
-    chatCore.destroy();
+    if (chatCore) chatCore.destroy();
 }
 
 // ---------------------------------------------------------------------------
@@ -325,7 +473,6 @@ async function runSearch(query) {
             title.className = "search-result-title";
             title.textContent = r.title;
             li.appendChild(title);
-            // Show first match preview with query bolded
             if (r.matches && r.matches.length > 0) {
                 const m = r.matches[0];
                 const prev = document.createElement("div");
@@ -345,7 +492,6 @@ async function runSearch(query) {
 }
 
 function highlightQuery(text, query) {
-    // Case-insensitive highlight of query within already-escaped HTML
     const re = new RegExp(`(${query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, "gi");
     return text.replace(re, "<mark>$1</mark>");
 }
@@ -390,7 +536,6 @@ function regenerateResponse(assistantMsgEl) {
         payload.thinking_budget = 10000;
     }
 
-    // Show the re-sent user message
     const spacer1 = document.createElement("div");
     spacer1.className = "message-spacer";
     messagesEl.appendChild(spacer1);
@@ -400,7 +545,6 @@ function regenerateResponse(assistantMsgEl) {
     messagesEl.appendChild(userEl);
     chatCore.scrollToBottom();
 
-    // Mark as streaming and send via WS — chatCore handles stream events
     chatCore.setStreaming(true);
     chatCore.sendRaw(payload);
 }
@@ -438,7 +582,7 @@ function formatTokens(n) {
 // Context bar
 // ---------------------------------------------------------------------------
 async function loadContext() {
-    const convId = chatCore.getConversationId();
+    const convId = chatCore?.getConversationId();
     if (!convId) {
         activeContext = { files: [], pins: [], total_tokens: 0 };
         renderContextBar();
@@ -467,10 +611,8 @@ function renderContextBar() {
     }
     contextBar.style.display = "block";
     contextBarFiles.innerHTML = "";
-    // Scroll chat so messages aren't hidden behind the taller input area
-    chatCore.scrollToBottom();
+    if (chatCore) chatCore.scrollToBottom();
 
-    // Render file items
     for (const f of (activeContext.files || [])) {
         const item = document.createElement("span");
         item.className = "context-file-item";
@@ -497,13 +639,11 @@ function renderContextBar() {
         contextBarFiles.appendChild(item);
     }
 
-    // Render pin items
     for (const p of (activeContext.pins || [])) {
         const item = document.createElement("span");
         item.className = "context-file-item context-pin-item";
 
         const nameSpan = document.createElement("span");
-        // Show truncated content as label for pins
         const label = (p.content || "").slice(0, 30) + (p.content && p.content.length > 30 ? "..." : "");
         nameSpan.textContent = label;
         item.appendChild(nameSpan);
@@ -601,7 +741,6 @@ async function loadBoard() {
 
 function renderBoard() {
     boardPinsEl.innerHTML = "";
-    // Merge pins and files into a single list sorted by date (newest first)
     const items = [];
     for (const pin of boardPins) {
         items.push({ _kind: "pin", _date: pin.created, ...pin });
@@ -662,7 +801,6 @@ function createPinEl(pin) {
         el.appendChild(note);
     }
 
-    // Tag chips (if pin has tags)
     if (pin.tags && pin.tags.length > 0) {
         const tagsEl = document.createElement("div");
         tagsEl.className = "pin-tags";
@@ -672,7 +810,6 @@ function createPinEl(pin) {
             chip.textContent = tag;
             tagsEl.appendChild(chip);
         }
-        // Click tag area to retag
         tagsEl.onclick = (e) => {
             e.stopPropagation();
             startPinRetag(pin, el);
@@ -686,7 +823,6 @@ function createPinEl(pin) {
     src.className = "pin-source";
     src.textContent = pin.source;
     meta.appendChild(src);
-    // Retag link (when no tags)
     if (!pin.tags || pin.tags.length === 0) {
         const retagLink = document.createElement("span");
         retagLink.className = "pin-retag-link";
@@ -723,20 +859,17 @@ function createFileCardEl(file) {
     };
     el.appendChild(del);
 
-    // File type label
     const ext = file.filename.split(".").pop().toLowerCase();
     const typeLabel = document.createElement("span");
     typeLabel.className = "file-type-label";
     typeLabel.textContent = ext;
     el.appendChild(typeLabel);
 
-    // Filename
     const nameEl = document.createElement("div");
     nameEl.className = "file-card-name";
     nameEl.textContent = file.filename;
     el.appendChild(nameEl);
 
-    // Tags
     if (file.tags && file.tags.length > 0) {
         const tagsEl = document.createElement("div");
         tagsEl.className = "pin-tags";
@@ -753,7 +886,6 @@ function createFileCardEl(file) {
         el.appendChild(tagsEl);
     }
 
-    // Token count + retag link
     const meta = document.createElement("div");
     meta.className = "pin-meta";
     const tokSpan = document.createElement("span");
@@ -779,7 +911,6 @@ function createFileCardEl(file) {
 }
 
 function startPinRetag(pin, el) {
-    // Remove any existing retag forms
     document.querySelectorAll(".retag-form").forEach(f => f.remove());
     const form = document.createElement("div");
     form.className = "retag-form";
@@ -794,7 +925,6 @@ function startPinRetag(pin, el) {
         const newTags = input.value.split(",").map(t => t.trim()).filter(Boolean);
         await api(`/pins/${pin.id}`, { method: "PATCH", body: JSON.stringify({ tags: newTags }) });
         form.remove();
-        // Update in-memory and re-render
         const idx = boardPins.findIndex(p => p.id === pin.id);
         if (idx >= 0) boardPins[idx].tags = newTags;
         renderBoard();
@@ -867,32 +997,158 @@ if (menuBtn) menuBtn.onclick = () => toggleSidebar();
 if (sidebarBackdrop) sidebarBackdrop.onclick = () => toggleSidebar(false);
 
 // ---------------------------------------------------------------------------
+// Backrooms: new session + prompts modals
+// ---------------------------------------------------------------------------
+function showNewSessionModal() {
+    const modal = document.getElementById("new-session-modal");
+    if (!modal) return;
+    const models = chatCore?.getAvailableModels?.() || [];
+    const container = document.getElementById("participant-rows");
+    if (!container) return;
+
+    // Clear and add initial 2 rows
+    container.innerHTML = "";
+    _addParticipantRow(container, models, 0);
+    _addParticipantRow(container, models, 1);
+    _updateParticipantUI(container);
+    modal.style.display = "flex";
+}
+
+function _addParticipantRow(container, models, seatIndex) {
+    const row = document.createElement("div");
+    row.className = "participant-row";
+    row.dataset.seat = seatIndex;
+
+    const label = document.createElement("label");
+    label.className = "form-label";
+    label.textContent = seatIndex === 0 ? `seat ${seatIndex + 1} (manages pacing)` : `seat ${seatIndex + 1}`;
+
+    const rowInner = document.createElement("div");
+    rowInner.className = "participant-row-inner";
+
+    const sel = document.createElement("select");
+    sel.className = "select-minimal form-select participant-select";
+    for (const m of models) {
+        const opt = document.createElement("option");
+        opt.value = m.id;
+        opt.textContent = m.label || m.id;
+        sel.appendChild(opt);
+    }
+
+    const removeBtn = document.createElement("button");
+    removeBtn.className = "text-btn participant-remove";
+    removeBtn.textContent = "\u00d7";
+    removeBtn.onclick = () => {
+        row.remove();
+        _updateParticipantUI(container);
+    };
+
+    rowInner.appendChild(sel);
+    rowInner.appendChild(removeBtn);
+    row.appendChild(label);
+    row.appendChild(rowInner);
+    container.appendChild(row);
+}
+
+function _updateParticipantUI(container) {
+    const rows = container.querySelectorAll(".participant-row");
+    // Hide remove button if only 2 rows
+    rows.forEach(row => {
+        const btn = row.querySelector(".participant-remove");
+        if (btn) btn.style.display = rows.length <= 2 ? "none" : "";
+    });
+    // Show/hide add button (max 5)
+    const addBtn = document.getElementById("add-participant-btn");
+    if (addBtn) addBtn.style.display = rows.length >= 5 ? "none" : "";
+}
+
+async function createBackroomsSession() {
+    const container = document.getElementById("participant-rows");
+    if (!container) return;
+    const selects = container.querySelectorAll(".participant-select");
+    const participants = [];
+    for (const sel of selects) {
+        if (sel.value) participants.push(sel.value);
+    }
+    if (participants.length < 2) return;
+    try {
+        const session = await api("/backrooms/sessions", {
+            method: "POST",
+            body: JSON.stringify({ participants }),
+        });
+        document.getElementById("new-session-modal").style.display = "none";
+        await loadConversations();
+        await openConversation(session.id, "backrooms");
+    } catch (e) {
+        console.error("Failed to create backrooms session:", e);
+    }
+}
+
+// Wire up new session modal
+if (newBackroomsBtn) {
+    newBackroomsBtn.onclick = (e) => {
+        e.preventDefault();
+        showNewSessionModal();
+    };
+}
+document.getElementById("new-session-modal-close")?.addEventListener("click", () => {
+    document.getElementById("new-session-modal").style.display = "none";
+});
+document.getElementById("create-session-btn")?.addEventListener("click", createBackroomsSession);
+document.getElementById("add-participant-btn")?.addEventListener("click", () => {
+    const container = document.getElementById("participant-rows");
+    if (!container) return;
+    const models = chatCore?.getAvailableModels?.() || [];
+    const nextSeat = container.querySelectorAll(".participant-row").length;
+    if (nextSeat >= 5) return;
+    _addParticipantRow(container, models, nextSeat);
+    _updateParticipantUI(container);
+});
+
+// Wire up prompts modal
+if (modelNamesEl) {
+    modelNamesEl.onclick = () => {
+        const sessionId = chatCore?.getConversationId();
+        if (sessionId && currentMode === "backrooms") {
+            BackroomsAdapter.openPromptsModal(sessionId);
+        }
+    };
+}
+document.getElementById("br-prompts-modal-close")?.addEventListener("click", () => {
+    document.getElementById("backrooms-prompts-modal").style.display = "none";
+});
+document.getElementById("br-save-prompts-btn")?.addEventListener("click", () => {
+    const sessionId = chatCore?.getConversationId();
+    if (sessionId) BackroomsAdapter.savePrompts(sessionId);
+});
+document.getElementById("br-reset-prompts-btn")?.addEventListener("click", () => {
+    const sessionId = chatCore?.getConversationId();
+    if (sessionId) BackroomsAdapter.resetPrompts(sessionId);
+});
+
+// ---------------------------------------------------------------------------
 // Event listeners (page-specific)
 // ---------------------------------------------------------------------------
 newChatBtn.onclick = quickCreateConversation;
 
-// Compact button — manually trigger conversation compaction
 if (compactBtn) {
     compactBtn.onclick = () => {
-        if (!chatCore.getConversationId() || chatCore.isCurrentlyStreaming()) return;
+        if (!chatCore?.getConversationId() || chatCore.isCurrentlyStreaming()) return;
         compactBtn.textContent = "compacting...";
         compactBtn.disabled = true;
         chatCore.sendRaw({ action: "compact" });
     };
 }
 
-// Sidebar search
 sidebarSearch.addEventListener("input", handleSidebarSearch);
 
-// Tag autocomplete on input
 messageInput.addEventListener("input", handleTagAutocomplete);
 messageInput.addEventListener("blur", () => {
     setTimeout(hideTagAutocomplete, 150);
 });
 
-// Prompt change mid-conversation
 promptSelect.onchange = async function () {
-    const convId = chatCore.getConversationId();
+    const convId = chatCore?.getConversationId();
     if (!convId) return;
     const id = this.value;
     const body = id ? { prompt_id: id } : { clear_prompt: true };
@@ -907,11 +1163,11 @@ document.addEventListener("keydown", (e) => {
     if (e.key.length !== 1 || e.ctrlKey || e.altKey || e.metaKey) return;
     const active = document.activeElement;
     if (active && (active.tagName === "INPUT" || active.tagName === "TEXTAREA" || active.tagName === "SELECT")) return;
-    if (messageInput.disabled || !chatCore.getConversationId()) return;
+    if (messageInput.disabled || !chatCore?.getConversationId()) return;
     messageInput.focus({ preventScroll: true });
 });
 
-// Board input auto-resize — matches chat textarea behavior
+// Board input auto-resize
 function autoResizeBoardInput() {
     boardInput.style.height = "auto";
     boardInput.style.height = Math.min(boardInput.scrollHeight, 200) + "px";
@@ -922,7 +1178,6 @@ boardInput.addEventListener("input", autoResizeBoardInput);
 document.getElementById("board-input-btn").onclick = () => {
     const val = boardInput.value.trim();
     if (!val) return;
-    // Extract #tags
     const tagRegex = /#([a-zA-Z0-9-]+)/g;
     const extractedTags = [];
     let match;
@@ -960,7 +1215,6 @@ boardPanel.addEventListener("drop", async (e) => {
         let hasDocFiles = false;
         for (const file of e.dataTransfer.files) {
             const ext = file.name.split(".").pop().toLowerCase();
-            // PDF/MD files → upload via file API
             if (ext === "pdf" || ext === "md") {
                 hasDocFiles = true;
                 const form = new FormData();
@@ -969,7 +1223,6 @@ boardPanel.addEventListener("drop", async (e) => {
                 try { await fetch("/api/files/upload", { method: "POST", body: form }); }
                 catch (err) { console.error("Upload failed:", err); }
             }
-            // Image files → pin as data URI
             else if (file.type.startsWith("image/")) {
                 const reader = new FileReader();
                 reader.onload = () => { createPin("image", reader.result); };
@@ -1018,9 +1271,11 @@ boardPanel.setAttribute("tabindex", "-1");
 // Init
 // ---------------------------------------------------------------------------
 marked.setOptions({ breaks: true, gfm: true });
+
+// Start in chat mode
+chatCore = createChatCoreForChat();
 chatCore.attachListeners();
-// Models must load before conversations — otherwise populateModelSelect()
-// overwrites the conversation's model with the first available option.
+
 chatCore.loadModels().then(() => {
     loadPrompts();
     loadAllTags();
@@ -1032,7 +1287,6 @@ chatCore.loadModels().then(() => {
         if (openId) {
             history.replaceState(null, "", "/");
             openConversation(openId).then(() => {
-                // Model speaks first — send init action after WS connects
                 if (autoInit) {
                     chatCore.setStreaming(true);
                     chatCore.sendRaw({ action: "init", model: "claude-haiku-4-5-20251001" });
@@ -1040,4 +1294,4 @@ chatCore.loadModels().then(() => {
             });
         }
     });
-}); // loadModels
+});
