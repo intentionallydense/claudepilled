@@ -185,6 +185,17 @@ class ToolDefinition(BaseModel):
             "input_schema": self.input_schema,
         }
 
+    def to_openai_format(self) -> dict[str, Any]:
+        """Convert to OpenAI function-calling format for non-Anthropic providers."""
+        return {
+            "type": "function",
+            "function": {
+                "name": self.name,
+                "description": self.description,
+                "parameters": self.input_schema,
+            },
+        }
+
 
 # ---------------------------------------------------------------------------
 # Messages

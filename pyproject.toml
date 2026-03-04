@@ -33,3 +33,4 @@ packages = ["claude_wrapper"]
 [project.scripts]
 claude-wrapper = "claude_wrapper.server:main"
 claude-wrapper-briefing = "claude_wrapper.briefing_assembly:cli_main"
+claude-wrapper-email = "claude_wrapper.email_ingestion:cli_main"

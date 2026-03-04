@@ -681,6 +681,12 @@ function createChatCore(config) {
                     el.thinkingCheckbox.checked = !!usedThinking;
                 }
 
+                // Update model label if the server told us the actual model used
+                if (event.model_label && streamingEl) {
+                    const roleLabel = streamingEl.querySelector(".role-label");
+                    if (roleLabel) roleLabel.textContent = event.model_label;
+                }
+
                 const wasEdit = !!editingId;
                 streamingEl = null;
                 streamingTextEl = null;

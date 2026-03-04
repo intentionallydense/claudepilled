@@ -39,6 +39,9 @@ from claude_wrapper.task_routes import init as init_task_routes
 from claude_wrapper.pin_db import PinDatabase
 from claude_wrapper.pin_routes import router as pin_router
 from claude_wrapper.pin_routes import init as init_pin_routes
+from claude_wrapper.email_db import EmailDatabase
+from claude_wrapper.email_routes import router as email_router
+from claude_wrapper.email_routes import init as init_email_routes
 from claude_wrapper.pin_tools import register_pin_tools
 from claude_wrapper.task_tools import BRAIN_DUMP_PROMPT, register_task_tools
 from claude_wrapper.tools import ToolRegistry
@@ -52,6 +55,7 @@ app.include_router(briefing_router)
 app.include_router(briefing_progress_router)
 app.include_router(briefing_anki_router)
 app.include_router(pin_router)
+app.include_router(email_router)
 
 # ---------------------------------------------------------------------------
 # Globals — initialized in lifespan
@@ -96,6 +100,8 @@ async def startup():
     pin_db_instance = PinDatabase(db)
     register_pin_tools(registry, pin_db_instance)
     init_pin_routes(pin_db_instance)
+    email_db = EmailDatabase(db)
+    init_email_routes(email_db, task_db, db=db)
     briefing_db = BriefingDatabase(db)
     init_all_series(briefing_db)
     manager = ConversationManager(client=client, tool_registry=registry, db=db, file_db=file_db_instance, pin_db=pin_db_instance)
@@ -110,6 +116,12 @@ async def startup():
     # Seed built-in "Brain dump" prompt if it doesn't exist yet
     if db.get_prompt("brain_dump") is None:
         db.save_prompt("brain_dump", "Brain dump", BRAIN_DUMP_PROMPT)
+
+    # Seed built-in "Email ingestion" prompt if it doesn't exist yet
+    from claude_wrapper.email_ingestion import _DEFAULT_PARSE_PROMPT
+    if db.get_prompt("email_ingestion") is None:
+        db.save_prompt("email_ingestion", "Email ingestion", _DEFAULT_PARSE_PROMPT)
+        db.set_setting("email_ingestion_prompt_id", "email_ingestion")
 
 
 # ---------------------------------------------------------------------------
@@ -176,6 +188,12 @@ async def create_conversation(req: CreateConversationRequest):
         prompt_id=req.prompt_id,
     )
     return {"id": conv.id, "title": conv.title, "model": conv.model}
+
+
+@app.get("/api/conversations/search")
+async def search_conversations(q: str = "", limit: int = 20):
+    """Search message content across all conversations."""
+    return manager.db.search_messages(q, limit=limit)
 
 
 @app.get("/api/conversations/{conversation_id}")
@@ -328,8 +346,8 @@ async def websocket_chat(ws: WebSocket, conversation_id: str):
                 continue
 
             if action == "init":
-                # Model speaks first — always uses Haiku (cheap, fast)
-                gen = manager.stream_init(conversation_id, model="claude-haiku-4-5-20251001")
+                # Model speaks first — GLM5 via OpenRouter (cheap, has tool use)
+                gen = manager.stream_init(conversation_id, model="openrouter/z-ai/glm-5")
             elif action == "edit":
                 parent_id = payload.get("parent_id") or None
                 if not user_text and not isinstance(user_message, list):
@@ -392,7 +410,7 @@ async def get_settings():
 
 @app.put("/api/settings")
 async def put_settings(body: dict):
-    allowed = {"universal_prompt", "universal_prompt_id", "default_model", "couch_seat_1_suffix", "couch_seat_2_suffix"}
+    allowed = {"universal_prompt", "universal_prompt_id", "default_model", "couch_seat_1_suffix", "couch_seat_2_suffix", "email_ingestion_prompt_id"}
     for key, value in body.items():
         if key in allowed:
             manager.db.set_setting(key, value)

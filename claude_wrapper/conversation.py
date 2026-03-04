@@ -21,6 +21,7 @@ from typing import Any
 from claude_wrapper.client import ClaudeClient, get_client_for_model
 from claude_wrapper.db import Database
 from claude_wrapper.models import (
+    AVAILABLE_MODELS,
     MODEL_PRICING,
     PROVIDERS,
     ContentBlock,
@@ -62,14 +63,18 @@ class ConversationManager:
     def _get_client_and_tools(self, model: str):
         """Return (client, tool_defs, is_anthropic) for the given model.
 
-        Non-Anthropic providers don't support Anthropic-format tool use,
-        so tools are set to None for them. Web search and prompt caching
-        are also Anthropic-only features.
+        Anthropic providers get Anthropic-format tool definitions. OpenAI-
+        compatible providers get OpenAI function-calling format. Web search
+        and prompt caching are Anthropic-only features.
         """
         provider = get_provider_for_model(model)
         is_anthropic = provider == "anthropic"
         client = get_client_for_model(model, self.client)
-        tool_defs = (self.tools.get_definitions() or None) if is_anthropic else None
+        raw_tools = self.tools.get_definitions() or None
+        if raw_tools and not is_anthropic:
+            tool_defs = [t.to_openai_format() for t in raw_tools]
+        else:
+            tool_defs = raw_tools
         return client, tool_defs, is_anthropic
 
     async def _get_openrouter_client(self):
@@ -438,7 +443,13 @@ class ConversationManager:
             cache_creation_input_tokens=conv_cost["cache_creation_tokens"],
             cache_read_input_tokens=conv_cost["cache_read_tokens"],
         )
-        yield StreamEvent(type=StreamEventType.MESSAGE_DONE)
+        # Include actual model used so the frontend can label it correctly
+        model_name = None
+        for m in AVAILABLE_MODELS:
+            if m["id"] == model:
+                model_name = m["name"]
+                break
+        yield StreamEvent(type=StreamEventType.MESSAGE_DONE, model_id=model, model_label=model_name or model)
 
     # ------------------------------------------------------------------
     # Edit message (create a branch)

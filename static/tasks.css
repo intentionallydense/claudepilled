@@ -72,9 +72,9 @@ body {
 .filter-btn {
     background: none;
     border: 1px solid #ddd;
-    padding: 0.25rem 0.5rem;
+    padding: 0.35rem 0.5rem;
     font-family: inherit;
-    font-size: 0.7rem;
+    font-size: 0.75rem;
     cursor: pointer;
     color: #666;
 }
@@ -84,9 +84,9 @@ body {
 .filter-select {
     background: #fff;
     border: 1px solid #ddd;
-    padding: 0.25rem 0.4rem;
+    padding: 0.35rem 0.5rem;
     font-family: inherit;
-    font-size: 0.7rem;
+    font-size: 0.75rem;
     color: #666;
     cursor: pointer;
 }
@@ -570,3 +570,72 @@ body {
     white-space: nowrap;
 }
 .project-dropdown-item:hover { background: #f5f5f5; }
+
+/* ------------------------------------------------------------------ */
+/* Ingestion feed — recently ingested emails                          */
+/* ------------------------------------------------------------------ */
+.ingestion-feed {
+    margin-top: 2rem;
+    padding-top: 1rem;
+    border-top: 1px solid #eee;
+}
+
+.ingestion-header {
+    font-size: 0.7rem;
+    color: #888;
+    cursor: pointer;
+    user-select: none;
+    margin-bottom: 0.5rem;
+}
+.ingestion-header:hover { color: #111; }
+
+.ingestion-list {
+    list-style: none;
+}
+
+.ingestion-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    padding: 0.5rem 0;
+    border-bottom: 1px solid #f5f5f5;
+    gap: 0.5rem;
+}
+.ingestion-item:last-child { border-bottom: none; }
+
+.ingestion-main {
+    flex: 1;
+    min-width: 0;
+}
+
+.ingestion-subject {
+    font-size: 0.8rem;
+    color: #111;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.ingestion-meta {
+    font-size: 0.65rem;
+    color: #888;
+    margin-top: 0.1rem;
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    align-items: center;
+}
+
+.ingestion-badge {
+    font-size: 0.6rem;
+    padding: 0.05rem 0.3rem;
+    border: 1px solid #ddd;
+    color: #666;
+}
+.ingestion-badge.badge-task { border-color: #e8a838; color: #e8a838; }
+.ingestion-badge.badge-pin { border-color: #888; color: #888; }
+.ingestion-badge.badge-none { border-color: #ddd; color: #aaa; }
+
+.ingestion-archive-btn {
+    flex-shrink: 0;
+}

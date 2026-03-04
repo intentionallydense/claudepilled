@@ -66,6 +66,23 @@ class Database:
                 token_count INTEGER NOT NULL DEFAULT 0,
                 uploaded_at TEXT NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS email_log (
+                id TEXT PRIMARY KEY,
+                message_id TEXT UNIQUE,
+                sender TEXT NOT NULL,
+                subject TEXT NOT NULL,
+                body_preview TEXT,
+                received_at TEXT NOT NULL,
+                processed_at TEXT NOT NULL,
+                actions TEXT NOT NULL DEFAULT '[]',
+                model_used TEXT,
+                parse_result TEXT,
+                archived INTEGER NOT NULL DEFAULT 0
+            );
+            CREATE INDEX IF NOT EXISTS idx_email_log_received
+                ON email_log(received_at);
+            CREATE INDEX IF NOT EXISTS idx_email_log_archived
+                ON email_log(archived);
         """)
         conn.commit()
 
@@ -596,6 +613,90 @@ class Database:
         conn.execute("DELETE FROM prompts WHERE id = ?", (prompt_id,))
         conn.commit()
         conn.close()
+
+    # ------------------------------------------------------------------
+    # Search
+    # ------------------------------------------------------------------
+
+    def search_messages(self, query: str, limit: int = 20) -> list[dict]:
+        """Search message content with LIKE, return results grouped by conversation.
+
+        The content column stores JSON (either {"type":"text","value":"..."} or a list
+        of content blocks). LIKE '%query%' matches against the raw JSON which naturally
+        contains the text strings. Results are grouped by conversation — each entry has
+        the conversation metadata plus a list of matching message previews.
+        """
+        if not query or not query.strip():
+            return []
+        pattern = f"%{query}%"
+        conn = self._connect()
+        rows = conn.execute(
+            """SELECT m.id AS message_id, m.conversation_id, m.role, m.content, m.created_at,
+                      c.title
+               FROM messages m
+               JOIN conversations c ON c.id = m.conversation_id
+               WHERE COALESCE(c.type, 'chat') = 'chat'
+                 AND m.content LIKE ?
+               ORDER BY m.created_at DESC
+               LIMIT ?""",
+            (pattern, limit * 5),  # fetch extra rows since we group by conversation
+        ).fetchall()
+        conn.close()
+
+        # Group by conversation, keeping only the first few matches per conversation
+        grouped: dict[str, dict] = {}
+        for row in rows:
+            conv_id = row["conversation_id"]
+            if conv_id not in grouped:
+                grouped[conv_id] = {
+                    "conversation_id": conv_id,
+                    "title": row["title"],
+                    "matches": [],
+                }
+            if len(grouped[conv_id]["matches"]) >= 3:
+                continue
+            # Extract a text preview from the JSON content
+            preview = self._extract_preview(row["content"], query)
+            grouped[conv_id]["matches"].append({
+                "message_id": row["message_id"],
+                "role": row["role"],
+                "preview": preview,
+                "created_at": row["created_at"],
+            })
+
+        results = list(grouped.values())[:limit]
+        return results
+
+    @staticmethod
+    def _extract_preview(content_json: str, query: str) -> str:
+        """Pull a readable text snippet from the JSON content column, centered on the query."""
+        try:
+            raw = json.loads(content_json)
+        except (json.JSONDecodeError, TypeError):
+            raw = content_json
+
+        if isinstance(raw, dict) and raw.get("type") == "text":
+            text = raw.get("value", "")
+        elif isinstance(raw, list):
+            text = " ".join(
+                b.get("text", "") for b in raw if isinstance(b, dict) and b.get("type") == "text"
+            )
+        else:
+            text = str(raw)
+
+        # Find query position and extract surrounding context
+        lower_text = text.lower()
+        idx = lower_text.find(query.lower())
+        if idx == -1:
+            return text[:120]
+        start = max(0, idx - 40)
+        end = min(len(text), idx + len(query) + 80)
+        snippet = text[start:end].strip()
+        if start > 0:
+            snippet = "..." + snippet
+        if end < len(text):
+            snippet = snippet + "..."
+        return snippet
 
     # ------------------------------------------------------------------
     # Serialization helpers

@@ -32,6 +32,9 @@ Claude Wrapper is a personal web UI and API wrapper supporting multiple LLM prov
 | `pin_db.py` | `PinDatabase` — CRUD for the `pins` table (moodboard). Images stored as data URIs. Supports tags and per-conversation active pin context |
 | `pin_routes.py` | FastAPI `APIRouter` for `/api/pins/*` endpoints — list, create, upload image, retag (PATCH), delete, list tags |
 | `pin_tools.py` | Claude tool definitions for moodboard (moodboard_pin with optional tags, moodboard_remove) |
+| `email_db.py` | `EmailDatabase` — CRUD for the `email_log` table (ingested emails and their created actions). Dedup via Message-ID |
+| `email_ingestion.py` | Email ingestion pipeline — IMAP fetch, LLM parsing (GLM5/Haiku), task/pin creation. CLI entry point for cron |
+| `email_routes.py` | FastAPI `APIRouter` for `/api/emails/*` endpoints — list recent, get, archive, manual ingest trigger |
 
 ### Frontend (`static/`)
 
@@ -46,7 +49,7 @@ Claude Wrapper is a personal web UI and API wrapper supporting multiple LLM prov
 | `icon-192.png`, `icon-512.png` | PWA icons (white background, dark "C" monospace letter) |
 | `settings.html/js/css` | Settings page — model defaults, universal prompt (dropdown from saved chat prompts), prompt library, per-seat couch suffixes |
 | `couch.html/js/css` | Couch page — two-model conversation UI, same 4-column layout as chat (sidebar, feed, tree, board). Messages use base chat styles (model messages get `assistant` class); `couch.css` only overrides curator/system dimming, prompt modal. Tree panel uses shared `buildTreeLayout()` with click-to-scroll, scroll sync, and search. Board panel shows unified pins + files merged by date. Supports `#tag` injection (context bar + autocomplete). Prompts modal has dropdown selects per seat (from saved couch prompts); prompts resolved at stream time with template variable substitution |
-| `tasks.html/js/css` | Task list page — urgency-sorted list, inline CRUD, brain-dump launcher |
+| `tasks.html/js/css` | Task list page — urgency-sorted list, inline CRUD, brain-dump launcher, email ingestion feed |
 | `briefing.html/js/css` | Daily briefing page — same 4-column layout as chat. Sidebar lists briefing dates, chat in center, tree adjacent, briefing content + reading progress in right panel. `briefing.css` has only briefing-specific styles (content formatting, progress panel, assemble button) |
 | `latex-rendering.js` | KaTeX integration for rendering LaTeX in chat messages |
 
@@ -63,14 +66,14 @@ Claude Wrapper is a personal web UI and API wrapper supporting multiple LLM prov
 
 | File | Purpose |
 |------|---------|
-| `pyproject.toml` | Package config, dependencies, entry points (`claude-wrapper`, `claude-wrapper-briefing`) |
+| `pyproject.toml` | Package config, dependencies, entry points (`claude-wrapper`, `claude-wrapper-briefing`, `claude-wrapper-email`) |
 | `example_tools.py` | Sample tool definitions (get_current_time, calculate) |
 | `.env` / `.env.example` | API key configuration |
 | `tag-injection-spec.md` | Design spec for the file/tag injection system |
 
 ## Key Decisions
 
-- **Multi-provider via OpenAI-compatible SDK** — all non-Anthropic providers (OpenAI, DeepSeek, Qwen, Kimi, Gemini) expose OpenAI-compatible APIs. One `openai` SDK client handles all of them by varying `base_url` and `api_key`. `ClaudeClient` stays untouched for Anthropic; `OpenAICompatibleClient` in `providers.py` handles the rest. `get_client_for_model()` in `client.py` routes to the right one based on the model's provider field. Per-provider client instances are cached. Features that degrade gracefully: thinking (Anthropic-only except DeepSeek R1 `reasoning_content`), web search (Anthropic-only), prompt caching (Anthropic-only), tool use (Anthropic-only for now). `/api/models` only returns models whose provider has an API key configured.
+- **Multi-provider via OpenAI-compatible SDK** — all non-Anthropic providers (OpenAI, DeepSeek, Qwen, Kimi, Gemini, OpenRouter) expose OpenAI-compatible APIs. One `openai` SDK client handles all of them by varying `base_url` and `api_key`. `ClaudeClient` stays untouched for Anthropic; `OpenAICompatibleClient` in `providers.py` handles the rest. `get_client_for_model()` in `client.py` routes to the right one based on the model's provider field. Per-provider client instances are cached. Features that degrade gracefully: thinking (Anthropic-only except DeepSeek R1 `reasoning_content`), web search (Anthropic-only), prompt caching (Anthropic-only). Tool use works for both Anthropic (native format) and OpenAI-compatible providers (function-calling format via `ToolDefinition.to_openai_format()`). `_build_messages()` in `providers.py` translates tool_use/tool_result content blocks to OpenAI's `tool_calls`/`role:"tool"` format. `/api/models` only returns models whose provider has an API key configured.
 - **Flat package layout** (not src-layout) — simpler for a personal project. Required explicit `packages = ["claude_wrapper"]` in pyproject.toml because setuptools auto-discovery picks up `static/`.
 - **SQLite with WAL mode** — single-file DB at `~/.claude-wrapper/data.db`. Good enough for single-user, easy to back up.
 - **Tree-structured messages** — each message has a `parent_id`, enabling conversation branching and branch switching. The `current_leaf_id` on a conversation tracks which branch is active.
@@ -96,8 +99,10 @@ Claude Wrapper is a personal web UI and API wrapper supporting multiple LLM prov
 - **Unified 4-column layout** — chat, briefing, and couch pages share the same CSS grid: `sidebar (200px) | chat (max 700px) | tree (200px) | content (1fr)`. Tree is adjacent to chat for quick branch navigation. On the chat page, column 4 is the moodboard; on the briefing page, it's the briefing content + reading progress; on the couch page, it's the shared pin board. All pages load `style.css` for shared layout classes; page-specific CSS files add only overrides.
 - **Mobile PWA** — CSS-only responsive layout via `@media (max-width: 768px)` at the end of `style.css` and `tasks.css`. On mobile: 4-column grid collapses to single column, sidebar becomes a fixed overlay toggled by a hamburger button, tree/board panels hidden. Desktop layout is completely untouched. Minimal PWA setup (`manifest.json` + no-op `sw.js`) enables "Add to Home Screen" — no offline support. Touch events use `onpointerdown` instead of `onmousedown` for compatibility.
 - **Model name labels** — assistant message labels show the actual model name (e.g. "Claude 4.6 Opus", "DeepSeek V3.2") instead of hardcoded "claude". Looked up from the `availableModels` array using the current model select value. Falls back to model ID, then "assistant".
+- **Conversation search** — sidebar search input does a debounced (300ms) `LIKE '%query%'` search against the raw JSON `content` column in the messages table. No FTS5 — overkill for single-user. Results are grouped by conversation and returned with text previews (snippet centered on the match). The search endpoint (`GET /api/conversations/search?q=...`) is defined before the `/{conversation_id}` catch-all to avoid FastAPI treating "search" as an ID. In the UI, search results replace the conversation list; clearing the input restores it.
 - **Conversation compaction** — manual "compact" button in the input actions bar. Summarizes older messages using GLM5 via OpenRouter (cheap/fast, falls back to Haiku), storing compaction records in the `conversations.metadata` JSON column. Compacted messages stay visible in the UI but dimmed (opacity 0.5), with a dashed divider showing where compaction occurred. The divider label is clickable to reveal/hide the summary. API calls replace compacted messages with a user/assistant summary pair to save tokens. Multiple compactions stack — each new one includes the previous summary as context. Compactions are branch-aware: if the current path doesn't contain the cutoff message, the compaction is ignored and full messages are sent. Minimum 10 messages required; last 6 messages always kept live.
-- **System model routing** — cheap system tasks (title generation, compaction summaries, briefing assembly) use GLM5 via OpenRouter (`z-ai/glm-5`) with reasoning/thinking enabled for richer output, falling back to Anthropic Haiku if no OpenRouter key is configured. Brain dump (model-speaks-first) is hardcoded to Anthropic Haiku. Briefing chat conversations use the user's selected model (defaults to Opus 4.6 via settings).
+- **System model routing** — cheap system tasks (title generation, compaction summaries, briefing assembly, email parsing) use GLM5 via OpenRouter (`z-ai/glm-5`) with reasoning/thinking enabled for richer output, falling back to Anthropic Haiku if no OpenRouter key is configured. Brain dump (model-speaks-first) uses GLM5 via OpenRouter (has tool use for task creation). Briefing chat conversations use the user's selected model (defaults to Opus 4.6 via settings).
+- **Email ingestion** — forward emails to a dedicated Gmail address, process via cron or manual API trigger. IMAP4_SSL fetches UNSEEN messages, marks them SEEN after processing. Each email is parsed by GLM5 (Haiku fallback) to extract tasks and pins. Results logged to `email_log` table with dedup via IMAP Message-ID. The tasks page shows a "recently ingested" feed section with archive controls. CLI entry point: `claude-wrapper-email`. Env vars: `EMAIL_IMAP_HOST`, `EMAIL_IMAP_USER`, `EMAIL_IMAP_PASSWORD`.
 
 ## Data Flow
 
@@ -122,13 +127,22 @@ Browser ─── WebSocket ──→ server.py ──→ ConversationManager �
                 ├── REST ──→ pin_routes ───→ PinDatabase
                 │            (create/tag)     (pins table)
                 │
-                └── #tag in message ──→ server resolves tags ──→ active_file_ids + active_pin_ids
-                                       (both files & pins)              │
-                                                                        ▼
-                                                           ConversationManager injects
-                                                           files as <injected_files> +
-                                                           pins as <injected_pins> into
-                                                           system prompt
+                ├── #tag in message ──→ server resolves tags ──→ active_file_ids + active_pin_ids
+                │                      (both files & pins)              │
+                │                                                       ▼
+                │                                          ConversationManager injects
+                │                                          files as <injected_files> +
+                │                                          pins as <injected_pins> into
+                │                                          system prompt
+                │
+                └── REST ──→ email_routes ──→ EmailDatabase
+                             (list/archive/     (email_log table)
+                              ingest)
+
+Cron/CLI ──→ email_ingestion.cli_main() ──→ IMAP fetch ──→ GLM5/Haiku parse ──→ TaskDatabase + PinDatabase
+                                                                                        │
+                                                                                        ▼
+                                                                                  EmailDatabase (log)
 ```
 
 Settings and prompts flow through REST endpoints → Database.

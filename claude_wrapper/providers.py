@@ -62,7 +62,7 @@ class OpenAICompatibleClient:
     ) -> AsyncGenerator[StreamEvent, None]:
         """Stream a response, yielding StreamEvents. Retries on overloaded/5xx."""
         api_messages = self._build_messages(messages, system)
-        kwargs = self._build_kwargs(api_messages, model, max_tokens, thinking_budget)
+        kwargs = self._build_kwargs(api_messages, model, max_tokens, thinking_budget, tools)
 
         last_exc = None
         for attempt in range(max_retries):
@@ -101,6 +101,9 @@ class OpenAICompatibleClient:
         has_emitted_input_usage = False
         reasoning_parts: list[str] = []
         in_reasoning = False
+        # Tool call accumulation — keyed by index
+        # Each entry: {"id": str, "name": str, "arguments": str}
+        tool_call_acc: dict[int, dict[str, str]] = {}
 
         async for chunk in stream:
             # Some providers send usage in the final chunk
@@ -180,6 +183,41 @@ class OpenAICompatibleClient:
                     text=delta.content,
                 )
 
+            # --- Tool call streaming ---
+            # OpenAI streams tool calls as delta.tool_calls list items.
+            # Each item has: index, id (first chunk only), function.name
+            # (first chunk), function.arguments (streamed as string deltas).
+            if delta.tool_calls:
+                for tc_delta in delta.tool_calls:
+                    idx = tc_delta.index
+                    if idx not in tool_call_acc:
+                        # First chunk for this tool call
+                        tool_call_acc[idx] = {
+                            "id": tc_delta.id or "",
+                            "name": (tc_delta.function.name if tc_delta.function else "") or "",
+                            "arguments": "",
+                        }
+                        if tool_call_acc[idx]["id"] and tool_call_acc[idx]["name"]:
+                            yield StreamEvent(
+                                type=StreamEventType.TOOL_USE_START,
+                                tool_use_id=tool_call_acc[idx]["id"],
+                                tool_name=tool_call_acc[idx]["name"],
+                            )
+                    else:
+                        # Update id/name if provided (some providers split across chunks)
+                        if tc_delta.id:
+                            tool_call_acc[idx]["id"] = tc_delta.id
+                        if tc_delta.function and tc_delta.function.name:
+                            tool_call_acc[idx]["name"] = tc_delta.function.name
+                            # Emit start if we now have both id and name
+                            yield StreamEvent(
+                                type=StreamEventType.TOOL_USE_START,
+                                tool_use_id=tool_call_acc[idx]["id"],
+                                tool_name=tool_call_acc[idx]["name"],
+                            )
+                    if tc_delta.function and tc_delta.function.arguments:
+                        tool_call_acc[idx]["arguments"] += tc_delta.function.arguments
+
             # Check for finish
             if choice.finish_reason is not None:
                 # If we ended while still in reasoning, close it
@@ -190,6 +228,19 @@ class OpenAICompatibleClient:
                     )
                     reasoning_parts = []
                     in_reasoning = False
+
+        # Emit TOOL_USE_DELTA for each accumulated tool call with parsed arguments
+        for tc in tool_call_acc.values():
+            if tc["id"] and tc["arguments"]:
+                try:
+                    parsed = json.loads(tc["arguments"])
+                except json.JSONDecodeError:
+                    parsed = {"_raw": tc["arguments"]}
+                yield StreamEvent(
+                    type=StreamEventType.TOOL_USE_DELTA,
+                    tool_use_id=tc["id"],
+                    tool_input=parsed,
+                )
 
         # If no usage was emitted (some providers don't include it in stream),
         # emit a zero-usage event so the caller has something to work with
@@ -218,7 +269,7 @@ class OpenAICompatibleClient:
     ) -> Message:
         """Non-streaming send — returns a complete Message."""
         api_messages = self._build_messages(messages, system)
-        kwargs = self._build_kwargs(api_messages, model, max_tokens, thinking_budget)
+        kwargs = self._build_kwargs(api_messages, model, max_tokens, thinking_budget, tools)
 
         response = await self._client.chat.completions.create(**kwargs)
         choice = response.choices[0]
@@ -233,6 +284,20 @@ class OpenAICompatibleClient:
 
         if choice.message.content:
             blocks.append(ContentBlock(type="text", text=choice.message.content))
+
+        # Handle tool calls in the response
+        if choice.message.tool_calls:
+            for tc in choice.message.tool_calls:
+                try:
+                    parsed_args = json.loads(tc.function.arguments) if tc.function.arguments else {}
+                except json.JSONDecodeError:
+                    parsed_args = {}
+                blocks.append(ContentBlock(
+                    type="tool_use",
+                    id=tc.id,
+                    name=tc.function.name,
+                    input=parsed_args,
+                ))
 
         return Message(role="assistant", content=blocks if blocks else "")
 
@@ -279,7 +344,8 @@ class OpenAICompatibleClient:
         """Prepend system message and normalize message format.
 
         OpenAI-compatible APIs use {"role": "system"} messages instead of
-        Anthropic's separate system parameter. No cache_control needed.
+        Anthropic's separate system parameter. Also converts Anthropic-format
+        tool_use/tool_result blocks to OpenAI function-calling format.
         """
         api_messages = []
         if system:
@@ -289,12 +355,43 @@ class OpenAICompatibleClient:
             role = msg["role"]
             content = msg["content"]
 
-            # Convert Anthropic-style content blocks to OpenAI format
-            if isinstance(content, list):
-                converted = self._convert_content_blocks(content)
-                api_messages.append({"role": role, "content": converted})
-            else:
+            if not isinstance(content, list):
                 api_messages.append({"role": role, "content": content})
+                continue
+
+            # Check if this is a tool_result user message — convert to role="tool"
+            tool_results = [b for b in content if b.get("type") == "tool_result"]
+            if role == "user" and tool_results and all(b.get("type") in ("tool_result",) for b in content):
+                for tr in tool_results:
+                    api_messages.append({
+                        "role": "tool",
+                        "tool_call_id": tr.get("tool_use_id", ""),
+                        "content": tr.get("content", ""),
+                    })
+                continue
+
+            # Check if assistant message has tool_use blocks — convert to tool_calls
+            tool_uses = [b for b in content if b.get("type") == "tool_use"]
+            if role == "assistant" and tool_uses:
+                text_parts = [b.get("text", "") for b in content if b.get("type") == "text" and b.get("text")]
+                tool_calls = []
+                for tu in tool_uses:
+                    tool_calls.append({
+                        "id": tu.get("id", ""),
+                        "type": "function",
+                        "function": {
+                            "name": tu.get("name", ""),
+                            "arguments": json.dumps(tu.get("input", {})),
+                        },
+                    })
+                msg_dict = {"role": "assistant", "content": "\n".join(text_parts) or None}
+                msg_dict["tool_calls"] = tool_calls
+                api_messages.append(msg_dict)
+                continue
+
+            # Default: convert content blocks normally
+            converted = self._convert_content_blocks(content)
+            api_messages.append({"role": role, "content": converted})
 
         return api_messages
 
@@ -347,6 +444,7 @@ class OpenAICompatibleClient:
         model: str | None,
         max_tokens: int | None,
         thinking_budget: int | None = None,
+        tools: list[Any] | None = None,
     ) -> dict[str, Any]:
         """Build kwargs for the OpenAI API call.
 
@@ -373,5 +471,9 @@ class OpenAICompatibleClient:
             # Ensure max_tokens is large enough for reasoning + response
             if effective_max <= thinking_budget:
                 kwargs["max_tokens"] = thinking_budget + 4096
+
+        # Pass tools in OpenAI function-calling format
+        if tools:
+            kwargs["tools"] = tools
 
         return kwargs

@@ -35,6 +35,8 @@ const compactBtn = document.getElementById("compact-btn");
 const menuBtn = document.getElementById("menu-btn");
 const sidebarBackdrop = document.getElementById("sidebar-backdrop");
 const sidebar = document.getElementById("sidebar");
+const sidebarSearch = document.getElementById("sidebar-search");
+const sidebarSectionLabel = document.getElementById("sidebar-section-label");
 
 // DOM elements — chat (passed to chatCore)
 const messagesEl = document.getElementById("messages");
@@ -285,6 +287,73 @@ function showWelcome() {
     inputArea.style.display = "none";
     if (compactBtn) compactBtn.style.display = "none";
     chatCore.destroy();
+}
+
+// ---------------------------------------------------------------------------
+// Sidebar search — debounced LIKE search across all message content
+// ---------------------------------------------------------------------------
+let _searchTimer = null;
+let _searchActive = false;
+
+function handleSidebarSearch() {
+    const query = sidebarSearch.value.trim();
+    clearTimeout(_searchTimer);
+    if (!query) {
+        clearSearch();
+        return;
+    }
+    _searchTimer = setTimeout(() => runSearch(query), 300);
+}
+
+async function runSearch(query) {
+    try {
+        const results = await api(`/conversations/search?q=${encodeURIComponent(query)}&limit=20`);
+        _searchActive = true;
+        sidebarSectionLabel.textContent = "results";
+        conversationList.innerHTML = "";
+        if (results.length === 0) {
+            const empty = document.createElement("li");
+            empty.className = "search-empty";
+            empty.textContent = "no matches";
+            conversationList.appendChild(empty);
+            return;
+        }
+        for (const r of results) {
+            const li = document.createElement("div");
+            li.className = "search-result";
+            const title = document.createElement("div");
+            title.className = "search-result-title";
+            title.textContent = r.title;
+            li.appendChild(title);
+            // Show first match preview with query bolded
+            if (r.matches && r.matches.length > 0) {
+                const m = r.matches[0];
+                const prev = document.createElement("div");
+                prev.className = "search-result-preview";
+                prev.innerHTML = highlightQuery(escapeHtml(m.preview), query);
+                li.appendChild(prev);
+            }
+            li.onclick = () => {
+                openConversation(r.conversation_id);
+                toggleSidebar(false);
+            };
+            conversationList.appendChild(li);
+        }
+    } catch (e) {
+        console.error("Search failed:", e);
+    }
+}
+
+function highlightQuery(text, query) {
+    // Case-insensitive highlight of query within already-escaped HTML
+    const re = new RegExp(`(${query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, "gi");
+    return text.replace(re, "<mark>$1</mark>");
+}
+
+function clearSearch() {
+    _searchActive = false;
+    sidebarSectionLabel.textContent = "conversations";
+    loadConversations();
 }
 
 // ---------------------------------------------------------------------------
@@ -811,6 +880,9 @@ if (compactBtn) {
         chatCore.sendRaw({ action: "compact" });
     };
 }
+
+// Sidebar search
+sidebarSearch.addEventListener("input", handleSidebarSearch);
 
 // Tag autocomplete on input
 messageInput.addEventListener("input", handleTagAutocomplete);

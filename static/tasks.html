@@ -95,6 +95,12 @@
             <div class="completed-header" id="completed-toggle">completed</div>
             <ul id="completed-list" class="completed-list"></ul>
         </div>
+
+        <!-- Recently ingested emails -->
+        <section id="ingestion-feed" class="ingestion-feed" style="display:none;">
+            <div class="ingestion-header" id="ingestion-toggle">recently ingested</div>
+            <ul id="ingestion-list" class="ingestion-list"></ul>
+        </section>
     </div>
     <script src="/tasks.js"></script>
     <script>if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js");</script>

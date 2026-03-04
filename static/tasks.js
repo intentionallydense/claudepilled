@@ -824,6 +824,81 @@ function esc(str) {
 }
 
 // ---------------------------------------------------------------------------
+// Ingestion feed — recently ingested emails
+// ---------------------------------------------------------------------------
+let ingestionVisible = true;
+
+async function loadIngestionFeed() {
+    const entries = await api("GET", "/api/emails?limit=10");
+    const section = document.getElementById("ingestion-feed");
+    const list = document.getElementById("ingestion-list");
+
+    if (!entries || entries.length === 0) {
+        section.style.display = "none";
+        return;
+    }
+
+    section.style.display = "block";
+    list.innerHTML = "";
+    list.style.display = ingestionVisible ? "block" : "none";
+    entries.forEach(entry => list.appendChild(createIngestionItem(entry)));
+}
+
+function createIngestionItem(entry) {
+    const li = document.createElement("li");
+    li.className = "ingestion-item";
+
+    const actions = (entry.actions || []);
+    const badges = actions.map(a => {
+        if (a.type === "task") return `<span class="ingestion-badge badge-task">task</span>`;
+        if (a.type === "pin") return `<span class="ingestion-badge badge-pin">pin</span>`;
+        return "";
+    }).join("") || '<span class="ingestion-badge badge-none">no actions</span>';
+
+    const timeAgo = formatTimeAgo(entry.processed_at);
+
+    li.innerHTML = `
+        <div class="ingestion-main">
+            <div class="ingestion-subject">${esc(entry.subject)}</div>
+            <div class="ingestion-meta">
+                <span>${esc(entry.sender)}</span>
+                <span>${timeAgo}</span>
+                ${badges}
+            </div>
+        </div>
+        <button class="text-btn ingestion-archive-btn">archive</button>
+    `;
+
+    li.querySelector(".ingestion-archive-btn").addEventListener("click", async (e) => {
+        e.stopPropagation();
+        await api("PATCH", `/api/emails/${entry.id}`);
+        loadIngestionFeed();
+    });
+
+    return li;
+}
+
+function formatTimeAgo(isoStr) {
+    if (!isoStr) return "";
+    const diff = Date.now() - new Date(isoStr).getTime();
+    const mins = Math.floor(diff / 60000);
+    if (mins < 1) return "just now";
+    if (mins < 60) return `${mins}m ago`;
+    const hrs = Math.floor(mins / 60);
+    if (hrs < 24) return `${hrs}h ago`;
+    const days = Math.floor(hrs / 24);
+    return `${days}d ago`;
+}
+
+function setupIngestionFeed() {
+    document.getElementById("ingestion-toggle").addEventListener("click", () => {
+        ingestionVisible = !ingestionVisible;
+        document.getElementById("ingestion-list").style.display = ingestionVisible ? "block" : "none";
+    });
+    loadIngestionFeed();
+}
+
+// ---------------------------------------------------------------------------
 // Init
 // ---------------------------------------------------------------------------
 document.addEventListener("DOMContentLoaded", () => {
@@ -831,5 +906,6 @@ document.addEventListener("DOMContentLoaded", () => {
     setupFilters();
     setupCompleted();
     setupBrainDump();
+    setupIngestionFeed();
     loadTasks();
 });

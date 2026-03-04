@@ -54,10 +54,62 @@ body {
 .sidebar-nav .text-btn { text-decoration: none; }
 .sidebar-nav .text-btn:hover { text-decoration: none; }
 
+/* Sidebar search */
+.sidebar-search-container {
+    padding: 0.5rem 1rem 0;
+}
+.sidebar-search {
+    width: 100%;
+    border: 1px solid #ddd;
+    padding: 0.25rem 0.4rem;
+    font-family: inherit;
+    font-size: 0.7rem;
+    color: #111;
+    background: #fff;
+}
+.sidebar-search:focus { outline: none; border-color: #111; }
+.sidebar-search::placeholder { color: #aaa; }
+
 .sidebar-section {
     padding: 1rem;
     flex: 1;
     overflow-y: auto;
+}
+
+/* Search results in sidebar */
+.search-result {
+    padding: 0.35rem 0;
+    cursor: pointer;
+    border-bottom: 1px solid #f5f5f5;
+}
+.search-result:last-child { border-bottom: none; }
+.search-result:hover { background: #fafafa; }
+.search-result-title {
+    font-size: 0.8rem;
+    color: #111;
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.search-result-preview {
+    font-size: 0.7rem;
+    color: #888;
+    line-height: 1.4;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    margin-top: 0.1rem;
+}
+.search-result-preview mark {
+    background: none;
+    color: #111;
+    font-weight: 600;
+}
+.search-empty {
+    font-size: 0.7rem;
+    color: #aaa;
+    padding: 0.5rem 0;
 }
 
 .section-label {
@@ -541,23 +593,23 @@ body {
 .send-btn {
     background: #111;
     color: #fff;
-    border: none;
-    padding: 0.4rem 1rem;
+    border: 1px solid #111;
+    padding: 0.35rem 1rem;
     font-family: inherit;
-    font-size: 0.85rem;
+    font-size: 0.8rem;
     cursor: pointer;
     flex-shrink: 0;
 }
-.send-btn:hover { background: #333; }
-.send-btn:disabled { background: #ccc; cursor: not-allowed; }
+.send-btn:hover { background: #333; border-color: #333; }
+.send-btn:disabled { background: #ccc; border-color: #ccc; cursor: not-allowed; }
 
 .stop-btn {
     background: #fff;
     color: #c00;
     border: 1px solid #c00;
-    padding: 0.4rem 1rem;
+    padding: 0.35rem 1rem;
     font-family: inherit;
-    font-size: 0.85rem;
+    font-size: 0.8rem;
     cursor: pointer;
     flex-shrink: 0;
 }
@@ -738,10 +790,10 @@ body {
 .board-input-btn {
     background: #111;
     color: #fff;
-    border: none;
-    padding: 0.4rem 1rem;
+    border: 1px solid #111;
+    padding: 0.35rem 1rem;
     font-family: inherit;
-    font-size: 0.85rem;
+    font-size: 0.8rem;
     cursor: pointer;
 }
 .board-input-btn:hover { background: #333; }

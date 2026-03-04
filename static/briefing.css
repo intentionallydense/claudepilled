@@ -90,13 +90,13 @@
 /* ------------------------------------------------------------------ */
 .briefing-assemble-btn {
     margin-left: auto;
-    padding: 0.25rem 0.5rem;
+    padding: 0.35rem 0.75rem;
     background: #111;
     color: #fff;
     border: none;
     cursor: pointer;
     font-family: inherit;
-    font-size: 0.7rem;
+    font-size: 0.75rem;
 }
 .briefing-assemble-btn:hover { background: #333; }
 .briefing-assemble-btn:disabled {
