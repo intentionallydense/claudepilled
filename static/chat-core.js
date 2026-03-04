@@ -139,24 +139,37 @@ function buildTreeLayout(treeData, nodeMapEl, layoutConfig, onNodeClick) {
 
     // Build children map, skipping tool_result and continuation assistant nodes
     const skippedIds = new Set();
+    // Detect if this is a backrooms session (any node has a speaker field)
+    const isBackrooms = nodes.some(n => n.speaker);
+
     const parentOf = {};
     const roleOf = {};
     for (const n of nodes) {
         parentOf[n.id] = n.parent_id;
         roleOf[n.id] = n.role;
-        if (n.role === "user" && n.parent_id && !n.preview) {
+        // Skip tool_result nodes (user with no preview) — but not in
+        // backrooms mode where all messages have meaningful content
+        if (!isBackrooms && n.role === "user" && n.parent_id && !n.preview) {
+            skippedIds.add(n.id);
+        }
+        // In backrooms, skip command/system notification nodes — they're
+        // metadata, not conversation content. Keeps the tree clean and
+        // spacing uniform between curator/model nodes.
+        if (isBackrooms && (n.speaker === "command" || n.speaker === "system")) {
             skippedIds.add(n.id);
         }
     }
-    for (const n of nodes) {
-        if (n.role !== "assistant" || !n.parent_id) continue;
-        if (!skippedIds.has(n.parent_id)) continue;
-        let ancestor = n.parent_id;
-        while (ancestor && skippedIds.has(ancestor)) {
-            ancestor = parentOf[ancestor];
-        }
-        if (ancestor && roleOf[ancestor] === "assistant") {
-            skippedIds.add(n.id);
+    if (!isBackrooms) {
+        for (const n of nodes) {
+            if (n.role !== "assistant" || !n.parent_id) continue;
+            if (!skippedIds.has(n.parent_id)) continue;
+            let ancestor = n.parent_id;
+            while (ancestor && skippedIds.has(ancestor)) {
+                ancestor = parentOf[ancestor];
+            }
+            if (ancestor && roleOf[ancestor] === "assistant") {
+                skippedIds.add(n.id);
+            }
         }
     }
 
@@ -306,10 +319,15 @@ function buildTreeLayout(treeData, nodeMapEl, layoutConfig, onNodeClick) {
 
     layout.forEach((item, i) => {
         const pos = posMap[item.id];
-        const r = nodeRadius[item.role] || 5;
+        // In backrooms, model speakers get larger dots; system/command/curator smaller
+        const speakerIsModel = item.speaker && item.speaker.startsWith("model_");
+        const effectiveRole = speakerIsModel ? "user" : item.role;
+        const r = nodeRadius[effectiveRole] || 5;
 
         const node = document.createElement("div");
         node.className = `tree-node ${item.role}-node`;
+        // Add speaker-specific class for backrooms coloring
+        if (item.speaker) node.classList.add(`tree-speaker-${item.speaker}`);
         if (item.onPath) node.classList.add("on-path");
         if (item.id === lastOnPath) node.classList.add("current-node");
 

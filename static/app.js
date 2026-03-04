@@ -55,6 +55,7 @@ const nodeMap = document.getElementById("node-map");
 const treeSearch = document.getElementById("tree-search");
 
 // DOM elements — backrooms-specific
+const backroomsToolbar = document.getElementById("backrooms-toolbar");
 const modelNamesEl = document.getElementById("model-names");
 const statusIndicator = document.getElementById("status-indicator");
 const newBackroomsBtn = document.getElementById("new-backrooms-btn");
@@ -235,6 +236,7 @@ function setBackroomsMode(meta) {
     currentMode = "backrooms";
     if (chatCore) { chatCore.destroy(); }
     BackroomsAdapter.init(meta, {
+        toolbar: backroomsToolbar,
         statusIndicator,
         modelNames: modelNamesEl,
         messages: messagesEl,
@@ -252,9 +254,8 @@ function updateModeUI() {
     if (promptSelect) promptSelect.style.display = isBackrooms ? "none" : "";
     if (thinkingCheckbox) thinkingCheckbox.parentElement.style.display = isBackrooms ? "none" : "";
     if (compactBtn) compactBtn.style.display = isBackrooms ? "none" : (compactBtn.dataset.show ? "" : "none");
-    // Backrooms-only elements
-    if (modelNamesEl) modelNamesEl.style.display = isBackrooms ? "" : "none";
-    if (statusIndicator) statusIndicator.style.display = isBackrooms ? "" : "none";
+    // Backrooms toolbar — single container for all backrooms controls
+    if (backroomsToolbar) backroomsToolbar.style.display = isBackrooms ? "flex" : "none";
     // Stop button not used in backrooms
     if (stopBtn) stopBtn.style.display = "none";
 }
@@ -402,6 +403,7 @@ async function openBackroomsSession(id) {
     } else {
         // Already in backrooms mode — just update adapter metadata
         BackroomsAdapter.init(meta, {
+            toolbar: backroomsToolbar,
             statusIndicator,
             modelNames: modelNamesEl,
             messages: messagesEl,
@@ -427,6 +429,7 @@ async function openBackroomsSession(id) {
     await loadContext();
     await BackroomsAdapter.loadPrompts();
     BackroomsAdapter.renderSpeedControls();
+    BackroomsAdapter.loadStats(id);
 }
 
 function showWelcome() {

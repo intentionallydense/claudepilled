@@ -45,6 +45,11 @@ class OpenAICompatibleClient:
         self.max_tokens = max_tokens
         self._client = AsyncOpenAI(api_key=api_key, base_url=base_url)
 
+    def _is_openrouter(self) -> bool:
+        """Check if this client is pointed at OpenRouter."""
+        base = str(self._client.base_url) if self._client.base_url else ""
+        return "openrouter.ai" in base
+
     # ------------------------------------------------------------------
     # Async streaming — same signature as ClaudeClient.stream()
     # ------------------------------------------------------------------
@@ -63,7 +68,7 @@ class OpenAICompatibleClient:
     ) -> AsyncGenerator[StreamEvent, None]:
         """Stream a response, yielding StreamEvents. Retries on overloaded/5xx."""
         api_messages = self._build_messages(messages, system)
-        kwargs = self._build_kwargs(api_messages, model, max_tokens, thinking_budget, tools)
+        kwargs = self._build_kwargs(api_messages, model, max_tokens, thinking_budget, tools, web_search=web_search)
         if temperature is not None:
             kwargs["temperature"] = temperature
 
@@ -448,6 +453,7 @@ class OpenAICompatibleClient:
         max_tokens: int | None,
         thinking_budget: int | None = None,
         tools: list[Any] | None = None,
+        web_search: bool = False,
     ) -> dict[str, Any]:
         """Build kwargs for the OpenAI API call.
 
@@ -455,10 +461,22 @@ class OpenAICompatibleClient:
         to request thinking traces. Also works with DeepSeek native API
         (which ignores unrecognized params). For providers that don't support
         reasoning, the extra param is harmlessly ignored.
+
+        When web_search is True and the client is pointed at OpenRouter,
+        appends `:online` to the model slug to enable web search. Search
+        results are folded into the response text automatically.
         """
+        effective_model = model or self.default_model
+
+        # OpenRouter web search — append :online variant to model slug.
+        # Detection: check if the base_url points to OpenRouter.
+        if web_search and self._is_openrouter():
+            if not effective_model.endswith(":online"):
+                effective_model = effective_model + ":online"
+
         effective_max = max_tokens or self.max_tokens
         kwargs: dict[str, Any] = {
-            "model": model or self.default_model,
+            "model": effective_model,
             "messages": messages,
             "max_tokens": effective_max,
             # Request usage in streaming responses (supported by most providers)

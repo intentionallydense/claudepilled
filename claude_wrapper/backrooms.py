@@ -36,6 +36,7 @@ from claude_wrapper.models import (
     MODEL_PRICING,
     get_api_model_id,
     get_model_name,
+    get_provider_for_model,
 )
 
 # ---------------------------------------------------------------------------
@@ -342,6 +343,7 @@ class BackroomsOrchestrator:
         iterations: int = 1,
         step_mode: bool = False,
         next_speaker: str | None = None,
+        thinking_budget: int | None = None,
     ) -> AsyncGenerator[StreamEvent, None]:
         """Run the backrooms turn loop, yielding events for the WebSocket.
 
@@ -349,6 +351,7 @@ class BackroomsOrchestrator:
         - iterations: how many full rounds to auto-run (default 1)
         - step_mode: if True, run exactly 1 turn then pause
         - next_speaker: override which speaker goes next (one-shot)
+        - thinking_budget: if set, enable extended thinking with this token budget
 
         If pre_formatted is True, curator_input is already in its stored
         format (e.g. from a regenerate) and should be saved as-is without
@@ -432,17 +435,47 @@ class BackroomsOrchestrator:
         total_input_tokens = 0
         total_output_tokens = 0
 
-        # Stats tracking
+        # Stats tracking — load previous cumulative stats and build on them
+        prev_stats = meta.get("last_stats") or {}
         stats = {
             "turns": {p["speaker"]: 0 for p in participants},
             "tokens": {p["speaker"]: {"input": 0, "output": 0} for p in participants},
             "response_times": {p["speaker"]: [] for p in participants},
             "commands_used": {},
         }
+        # Merge in previous cumulative values
+        for key in ("turns", "tokens", "response_times", "commands_used"):
+            prev = prev_stats.get(key)
+            if not prev:
+                continue
+            if key == "turns":
+                for spk, val in prev.items():
+                    if spk in stats["turns"]:
+                        stats["turns"][spk] += val
+            elif key == "tokens":
+                for spk, tok in prev.items():
+                    if spk in stats["tokens"]:
+                        stats["tokens"][spk]["input"] += tok.get("input", 0)
+                        stats["tokens"][spk]["output"] += tok.get("output", 0)
+            elif key == "response_times":
+                for spk, times in prev.items():
+                    if spk in stats["response_times"]:
+                        stats["response_times"][spk].extend(times)
+            elif key == "commands_used":
+                for cmd_name, count in prev.items():
+                    stats["commands_used"][cmd_name] = stats["commands_used"].get(cmd_name, 0) + count
 
-        for turn in range(target_turns):
+        turns_completed = 0   # actual output turns (muted turns don't count)
+        total_attempts = 0   # safety cap — prevents infinite loops
+
+        while turns_completed < target_turns and total_attempts < MAX_TURNS:
+            # Re-check target_turns each iteration so add/remove participant
+            # adjustments take effect mid-loop
+            if not step_mode:
+                target_turns = min(iterations * len(participants), MAX_TURNS)
+
             # Pick next speaker — override on first turn if requested
-            override = next_speaker if turn == 0 else None
+            override = next_speaker if total_attempts == 0 else None
             current_seat = self._pick_next_seat(current_seat, participants, override)
 
             p = participants[current_seat]
@@ -450,9 +483,11 @@ class BackroomsOrchestrator:
             model_label = p["label"]
             speaker = p["speaker"]
 
-            # Check muting — skip muted participants
+            # Check muting — skip muted participants (counts as an attempt
+            # but not a completed turn, so other participants still get theirs)
             if session_state.muted.get(speaker, 0) > 0:
                 session_state.muted[speaker] -= 1
+                total_attempts += 1
                 continue
 
             # Signal turn start
@@ -485,19 +520,36 @@ class BackroomsOrchestrator:
             # Get temperature override if set by !temperature command
             temperature = session_state.temperatures.get(speaker)
 
+            # Anthropic + OpenRouter models get native web search;
+            # others fall back to !search command proxy
+            provider = get_provider_for_model(model_id)
+            has_web_search = provider in ("anthropic", "openrouter")
             stream_kwargs = dict(
                 messages=api_messages,
                 model=get_api_model_id(model_id),
                 system=system_prompt,
-                web_search=False,
+                web_search=has_web_search,
                 max_tokens=4096,
             )
             if temperature is not None:
                 stream_kwargs["temperature"] = temperature
+            if thinking_budget is not None:
+                stream_kwargs["thinking_budget"] = thinking_budget
+
+            thinking_parts: list[str] = []
+            thinking_signature: str | None = None
 
             async for event in turn_client.stream(**stream_kwargs):
                 if event.type == StreamEventType.TEXT_DELTA:
                     full_text += event.text
+                    yield event
+                elif event.type == StreamEventType.THINKING_DELTA:
+                    if event.thinking:
+                        thinking_parts.append(event.thinking)
+                    yield event
+                elif event.type == StreamEventType.THINKING_DONE:
+                    if hasattr(event, "signature") and event.signature:
+                        thinking_signature = event.signature
                     yield event
                 elif event.type == StreamEventType.USAGE:
                     turn_input_tokens += event.input_tokens or 0
@@ -511,18 +563,61 @@ class BackroomsOrchestrator:
             parsed_text, parsed_cmds = parse_commands(full_text)
             display_text = parsed_text
 
-            # Execute commands and collect results
+            # Execute commands first (need results for side effects) but
+            # defer DB saves — model response should appear before notifications
+            cmd_results = []
             for cmd in parsed_cmds:
                 result = await execute_command(cmd, speaker, session_state, self.client)
-                # Track command usage
                 stats["commands_used"][cmd.name] = stats["commands_used"].get(cmd.name, 0) + 1
+                cmd_results.append((cmd, result))
 
-                if result.strip_from_text:
-                    # Already stripped by parse_commands
-                    pass
+            # Calculate cost
+            pricing = MODEL_PRICING.get(model_id, (0.0, 0.0))
+            turn_cost = (
+                turn_input_tokens * pricing[0] / 1_000_000
+                + turn_output_tokens * pricing[1] / 1_000_000
+            )
+            total_input_tokens += turn_input_tokens
+            total_output_tokens += turn_output_tokens
 
+            # Update stats
+            stats["turns"][speaker] += 1
+            stats["tokens"][speaker]["input"] += turn_input_tokens
+            stats["tokens"][speaker]["output"] += turn_output_tokens
+            stats["response_times"][speaker].append(round(turn_elapsed, 2))
+
+            # Build message content — include thinking block if present
+            if thinking_parts:
+                msg_content = []
+                msg_content.append(ContentBlock(
+                    type="thinking",
+                    thinking="".join(thinking_parts),
+                    signature=thinking_signature,
+                ))
+                msg_content.append(ContentBlock(type="text", text=display_text))
+            else:
+                msg_content = display_text
+
+            # Save model response FIRST — so it appears before notifications
+            assistant_msg = Message(
+                role="assistant",
+                content=msg_content,
+                speaker=speaker,
+                parent_id=parent_id,
+            )
+            self.db.save_message(
+                session_id,
+                assistant_msg,
+                input_tokens=turn_input_tokens,
+                output_tokens=turn_output_tokens,
+                cost=turn_cost,
+            )
+            parent_id = assistant_msg.id
+            messages.append(assistant_msg)
+
+            # Now save command notifications/whispers AFTER model response
+            for cmd, result in cmd_results:
                 if result.notification:
-                    # Emit command event to frontend
                     yield StreamEvent(
                         type=StreamEventType.BACKROOMS_COMMAND,
                         command_name=cmd.name,
@@ -530,11 +625,10 @@ class BackroomsOrchestrator:
                         command_success=True,
                         speaker=speaker,
                     )
-                    # Save notification as system message
                     notif_msg = Message(
                         role="assistant",
                         content=result.notification,
-                        speaker="system",
+                        speaker="command",
                         parent_id=parent_id,
                     )
                     self.db.save_message(session_id, notif_msg)
@@ -542,7 +636,6 @@ class BackroomsOrchestrator:
                     parent_id = notif_msg.id
 
                 if result.whisper_target and result.whisper_text:
-                    # Save whisper message — only visible to source and target
                     whisper_content = f"[whisper to {result.whisper_target}]: {result.whisper_text}"
                     whisper_msg = Message(
                         role="assistant",
@@ -550,13 +643,10 @@ class BackroomsOrchestrator:
                         speaker=speaker,
                         parent_id=parent_id,
                     )
-                    # Mark as whisper in a way we can detect during message building
-                    # We use a convention: content starts with "[whisper to "
                     self.db.save_message(session_id, whisper_msg)
                     messages.append(whisper_msg)
                     parent_id = whisper_msg.id
 
-                    # Emit whisper event to frontend (curator sees all)
                     yield StreamEvent(
                         type=StreamEventType.BACKROOMS_COMMAND,
                         command_name="whisper",
@@ -580,7 +670,6 @@ class BackroomsOrchestrator:
                                 "speaker": f"model_{new_seat}",
                             }
                             participants.append(new_p)
-                            # Add system prompt for new seat
                             prompt = self._resolve_prompt(meta, new_seat, participants)
                             suffix = self._resolve_suffix(new_seat, participants)
                             if suffix:
@@ -588,17 +677,11 @@ class BackroomsOrchestrator:
                             if context_block:
                                 prompt = prompt + "\n\n" + context_block
                             system_prompts.append(prompt)
-                            # Update stats tracking
                             stats["turns"][new_p["speaker"]] = 0
                             stats["tokens"][new_p["speaker"]] = {"input": 0, "output": 0}
                             stats["response_times"][new_p["speaker"]] = []
-                            # Update metadata
                             meta["participants"] = participants
                             self.db.update_conversation_metadata(session_id, meta)
-                            # Recalculate target_turns
-                            if not step_mode:
-                                target_turns = min(iterations * len(participants), MAX_TURNS)
-                            # Notify frontend
                             yield StreamEvent(
                                 type=StreamEventType.BACKROOMS_COMMAND,
                                 command_name="add_ai",
@@ -618,22 +701,16 @@ class BackroomsOrchestrator:
                             if remove_idx is not None:
                                 participants.pop(remove_idx)
                                 system_prompts.pop(remove_idx)
-                                # Re-seat remaining participants
                                 for ri, rp in enumerate(participants):
                                     rp["seat"] = ri
                                     rp["speaker"] = f"model_{ri}"
-                                # Adjust current_seat if needed
                                 if current_seat >= len(participants):
                                     current_seat = 0
-                                # Update metadata
                                 meta["participants"] = participants
                                 self.db.update_conversation_metadata(session_id, meta)
-                                # Rebuild stats keys
                                 stats["turns"] = {p["speaker"]: stats["turns"].get(p["speaker"], 0) for p in participants}
                                 stats["tokens"] = {p["speaker"]: stats["tokens"].get(p["speaker"], {"input": 0, "output": 0}) for p in participants}
                                 stats["response_times"] = {p["speaker"]: stats["response_times"].get(p["speaker"], []) for p in participants}
-                                if not step_mode:
-                                    target_turns = min(iterations * len(participants), MAX_TURNS)
                                 yield StreamEvent(
                                     type=StreamEventType.BACKROOMS_COMMAND,
                                     command_name="remove_ai",
@@ -641,38 +718,6 @@ class BackroomsOrchestrator:
                                     command_success=True,
                                     speaker=speaker,
                                 )
-
-            # Calculate cost
-            pricing = MODEL_PRICING.get(model_id, (0.0, 0.0))
-            turn_cost = (
-                turn_input_tokens * pricing[0] / 1_000_000
-                + turn_output_tokens * pricing[1] / 1_000_000
-            )
-            total_input_tokens += turn_input_tokens
-            total_output_tokens += turn_output_tokens
-
-            # Update stats
-            stats["turns"][speaker] += 1
-            stats["tokens"][speaker]["input"] += turn_input_tokens
-            stats["tokens"][speaker]["output"] += turn_output_tokens
-            stats["response_times"][speaker].append(round(turn_elapsed, 2))
-
-            # Save the message
-            assistant_msg = Message(
-                role="assistant",
-                content=display_text,
-                speaker=speaker,
-                parent_id=parent_id,
-            )
-            self.db.save_message(
-                session_id,
-                assistant_msg,
-                input_tokens=turn_input_tokens,
-                output_tokens=turn_output_tokens,
-                cost=turn_cost,
-            )
-            parent_id = assistant_msg.id
-            messages.append(assistant_msg)
 
             # Signal turn end
             yield StreamEvent(
@@ -683,10 +728,11 @@ class BackroomsOrchestrator:
                 text=display_text,
             )
 
-            # Last turn — emit pause (no break needed, loop ends naturally)
-            if turn == target_turns - 1:
-                pause_reason = "round complete" if not step_mode else "step complete"
-                yield StreamEvent(type=StreamEventType.BACKROOMS_PAUSED, text=pause_reason)
+            turns_completed += 1
+            total_attempts += 1
+
+            # Check if we've hit the target
+            if turns_completed >= target_turns or total_attempts >= MAX_TURNS:
                 break
 
             # Pacing delay — use speed multiplier
@@ -694,6 +740,10 @@ class BackroomsOrchestrator:
             delay = random.uniform(*delay_range)
             yield StreamEvent(type=StreamEventType.BACKROOMS_STATUS, text="...")
             await asyncio.sleep(delay)
+
+        # Always emit pause after loop ends (whether via break or condition)
+        pause_reason = "step complete" if step_mode else "round complete"
+        yield StreamEvent(type=StreamEventType.BACKROOMS_PAUSED, text=pause_reason)
 
         # Emit stats
         yield StreamEvent(
@@ -811,7 +861,7 @@ class BackroomsOrchestrator:
                 label = speaker_labels[speaker]
                 content = self._build_labeled_content(msg, f"[{label}]")
                 raw.append({"role": "user", "content": content})
-            elif speaker == "system":
+            elif speaker in ("system", "command"):
                 raw.append({"role": "user", "content": text})
             else:
                 # curator or unknown — may have images

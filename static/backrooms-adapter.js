@@ -14,6 +14,7 @@ const BackroomsAdapter = (function () {
     // -----------------------------------------------------------------------
     let sessionMeta = null; // { participants: [{seat, id, label, speaker}, ...] }
     let chatCoreRef = null;
+    let toolbarEl = null;
     let statusEl = null;
     let modelNamesEl = null;
     let messagesEl = null;
@@ -22,11 +23,13 @@ const BackroomsAdapter = (function () {
     let currentIterations = 1;
     let currentStepMode = false;
     let currentNextSpeaker = null;
+    let currentThinkingEnabled = false;
 
     // Streaming state (adapter manages its own since turn_start/turn_end
     // don't map to chat-core's single-assistant-message lifecycle)
     let streamingEl = null;
     let streamingTextEl = null;
+    let streamingThinkingEl = null;
     let streamingRawText = "";
     let markdownRenderTimer = null;
     const MARKDOWN_DEBOUNCE_MS = 80;
@@ -77,8 +80,8 @@ const BackroomsAdapter = (function () {
             const b = parts.find(p => p.seat === 1);
             return b ? b.label : "Model B";
         }
-        if (speaker === "curator") return "curator";
-        if (speaker === "system") return "";
+        if (speaker === "curator") return "you";
+        if (speaker === "system" || speaker === "command") return "";
         return speaker || "";
     }
 
@@ -231,7 +234,7 @@ const BackroomsAdapter = (function () {
             editedMsg.remove();
         }
 
-        const curatorEl = createSpeakerMessageEl("curator", "curator");
+        const curatorEl = createSpeakerMessageEl("curator", "you");
         curatorEl.querySelector(".message-text").textContent = newText;
         messagesEl.appendChild(curatorEl);
         scrollDown();
@@ -263,7 +266,7 @@ const BackroomsAdapter = (function () {
         curatorMsgEl.remove();
 
         addSpacer();
-        const newCuratorEl = createSpeakerMessageEl("curator", "curator");
+        const newCuratorEl = createSpeakerMessageEl("curator", "you");
         newCuratorEl.querySelector(".message-text").textContent = curatorText;
         messagesEl.appendChild(newCuratorEl);
         scrollDown();
@@ -282,10 +285,7 @@ const BackroomsAdapter = (function () {
             container = document.createElement("span");
             container.id = "speed-controls";
             container.className = "speed-controls";
-            // Insert after status indicator
-            if (statusEl && statusEl.parentElement) {
-                statusEl.parentElement.insertBefore(container, statusEl.nextSibling);
-            }
+            if (toolbarEl) toolbarEl.appendChild(container);
         }
         container.innerHTML = "";
         const speeds = [0.5, 1, 2, 5];
@@ -311,10 +311,7 @@ const BackroomsAdapter = (function () {
             container = document.createElement("span");
             container.id = "iteration-controls";
             container.className = "iteration-controls";
-            const speedEl = document.getElementById("speed-controls");
-            if (speedEl && speedEl.parentElement) {
-                speedEl.parentElement.insertBefore(container, speedEl.nextSibling);
-            }
+            if (toolbarEl) toolbarEl.appendChild(container);
         }
         container.innerHTML = "";
         const label = document.createElement("span");
@@ -346,10 +343,7 @@ const BackroomsAdapter = (function () {
             container = document.createElement("span");
             container.id = "step-mode-controls";
             container.className = "step-mode-controls";
-            const iterEl = document.getElementById("iteration-controls");
-            if (iterEl && iterEl.parentElement) {
-                iterEl.parentElement.insertBefore(container, iterEl.nextSibling);
-            }
+            if (toolbarEl) toolbarEl.appendChild(container);
         }
         container.innerHTML = "";
         const btn = document.createElement("button");
@@ -365,6 +359,58 @@ const BackroomsAdapter = (function () {
     }
 
     // -----------------------------------------------------------------------
+    // Thinking toggle
+    // -----------------------------------------------------------------------
+    function renderThinkingToggle() {
+        let container = document.getElementById("thinking-toggle-controls");
+        if (!container) {
+            container = document.createElement("span");
+            container.id = "thinking-toggle-controls";
+            container.className = "thinking-toggle-controls";
+            if (toolbarEl) toolbarEl.appendChild(container);
+        }
+        container.innerHTML = "";
+        const btn = document.createElement("button");
+        btn.className = "speed-btn" + (currentThinkingEnabled ? " active" : "");
+        btn.textContent = "thinking";
+        btn.title = "Enable extended thinking for models that support it";
+        btn.onclick = () => {
+            currentThinkingEnabled = !currentThinkingEnabled;
+            chatCoreRef?.sendRaw({ action: "set_thinking", enabled: currentThinkingEnabled });
+            renderThinkingToggle();
+        };
+        container.appendChild(btn);
+    }
+
+    /** Create a collapsible thinking block inside a message element.
+     *  Mirrors createThinkingBlock() from chat-core.js (which is private). */
+    function createBackroomsThinkingBlock(parentEl) {
+        const container = document.createElement("div");
+        container.className = "thinking-block";
+
+        const header = document.createElement("div");
+        header.className = "thinking-header open";
+        header.innerHTML = '<span class="arrow">&#9654;</span> <span class="thinking-label">thinking...</span>';
+        container.appendChild(header);
+
+        const body = document.createElement("div");
+        body.className = "thinking-body open";
+        const content = document.createElement("div");
+        content.className = "thinking-content";
+        body.appendChild(content);
+        container.appendChild(body);
+
+        const textEl = parentEl.querySelector(".message-text");
+        parentEl.insertBefore(container, textEl);
+
+        header.onclick = () => {
+            header.classList.toggle("open");
+            body.classList.toggle("open");
+        };
+        return container;
+    }
+
+    // -----------------------------------------------------------------------
     // Next-turn override
     // -----------------------------------------------------------------------
     function renderNextSpeakerControl() {
@@ -373,10 +419,7 @@ const BackroomsAdapter = (function () {
             container = document.createElement("span");
             container.id = "next-speaker-controls";
             container.className = "next-speaker-controls";
-            const stepEl = document.getElementById("step-mode-controls");
-            if (stepEl && stepEl.parentElement) {
-                stepEl.parentElement.insertBefore(container, stepEl.nextSibling);
-            }
+            if (toolbarEl) toolbarEl.appendChild(container);
         }
         container.innerHTML = "";
         const label = document.createElement("span");
@@ -464,12 +507,14 @@ const BackroomsAdapter = (function () {
          */
         init(meta, elements) {
             sessionMeta = meta;
+            toolbarEl = elements.toolbar;
             statusEl = elements.statusIndicator;
             modelNamesEl = elements.modelNames;
             messagesEl = elements.messages;
             currentSpeed = meta?.speed || 1.0;
             currentIterations = meta?.iterations || 1;
             currentStepMode = meta?.step_mode || false;
+            currentThinkingEnabled = !!meta?.thinking_budget;
             currentNextSpeaker = null;
         },
 
@@ -487,6 +532,7 @@ const BackroomsAdapter = (function () {
             renderSpeedControls();
             renderIterationControls();
             renderStepModeToggle();
+            renderThinkingToggle();
             renderNextSpeakerControl();
         },
 
@@ -513,6 +559,28 @@ const BackroomsAdapter = (function () {
                             return true;
                         }
 
+                        case "thinking_delta":
+                            if (streamingEl) {
+                                if (!streamingThinkingEl) {
+                                    streamingThinkingEl = createBackroomsThinkingBlock(streamingEl);
+                                }
+                                const tc = streamingThinkingEl.querySelector(".thinking-content");
+                                tc.textContent += event.thinking || "";
+                                tc.classList.add("streaming-cursor");
+                                maybeScroll();
+                            }
+                            return true;
+
+                        case "thinking_done":
+                            if (streamingThinkingEl) {
+                                const tc = streamingThinkingEl.querySelector(".thinking-content");
+                                tc.classList.remove("streaming-cursor");
+                                const label = streamingThinkingEl.querySelector(".thinking-label");
+                                if (label) label.textContent = "thought process";
+                            }
+                            streamingThinkingEl = null;
+                            return true;
+
                         case "text_delta":
                             if (streamingTextEl) {
                                 streamingRawText += event.text;
@@ -532,6 +600,7 @@ const BackroomsAdapter = (function () {
                             markdownRenderTimer = null;
                             streamingEl = null;
                             streamingTextEl = null;
+                            streamingThinkingEl = null;
                             return true;
 
                         case "backrooms_command": {
@@ -568,6 +637,11 @@ const BackroomsAdapter = (function () {
                             return true;
                         }
 
+                        case "thinking_updated":
+                            currentThinkingEnabled = !!event.enabled;
+                            renderThinkingToggle();
+                            return true;
+
                         case "speed_updated":
                             currentSpeed = event.speed || 1.0;
                             renderSpeedControls();
@@ -591,6 +665,7 @@ const BackroomsAdapter = (function () {
                         case "message_done":
                             streamingEl = null;
                             streamingTextEl = null;
+                            streamingThinkingEl = null;
                             if (chatCoreRef) {
                                 chatCoreRef.setStreaming(false);
                                 chatCoreRef.fetchAndUpdateCost();
@@ -678,6 +753,13 @@ const BackroomsAdapter = (function () {
                     el.classList.add("speaker-whisper");
                 }
 
+                // Command notifications saved with speaker="command" — add
+                // the speaker-command class so they render identically to
+                // live-streamed command events (styled box, not italic center)
+                if (speaker === "command") {
+                    el.classList.add("speaker-command");
+                }
+
                 const useMarkdown = isModelSpeaker(speaker);
 
                 if (typeof content === "string") {
@@ -686,7 +768,14 @@ const BackroomsAdapter = (function () {
                 } else if (Array.isArray(content)) {
                     const textParts = [];
                     for (const block of content) {
-                        if (block.type === "text" && block.text) {
+                        if (block.type === "thinking" && block.thinking) {
+                            const thinkingBlock = createBackroomsThinkingBlock(el);
+                            thinkingBlock.querySelector(".thinking-content").textContent = block.thinking;
+                            thinkingBlock.querySelector(".thinking-label").textContent = "thought process";
+                            // Start collapsed on reload
+                            thinkingBlock.querySelector(".thinking-header").classList.remove("open");
+                            thinkingBlock.querySelector(".thinking-body").classList.remove("open");
+                        } else if (block.type === "text" && block.text) {
                             textParts.push(block.text);
                         } else if (block.type === "image" && block.source) {
                             const img = document.createElement("img");
@@ -721,7 +810,7 @@ const BackroomsAdapter = (function () {
          */
         renderCuratorMessage(text, images) {
             addSpacer();
-            const el = createSpeakerMessageEl("curator", "curator");
+            const el = createSpeakerMessageEl("curator", "you");
             const textEl = el.querySelector(".message-text");
             textEl.textContent = `[shared: ${text}]`;
             for (const img of (images || [])) {
@@ -843,6 +932,20 @@ const BackroomsAdapter = (function () {
                 const saveStatus = document.getElementById("br-prompts-save-status");
                 if (saveStatus) saveStatus.textContent = "error saving";
             }
+        },
+
+        /** Load and display cumulative stats from session metadata. */
+        async loadStats(sessionId) {
+            if (!sessionId) return;
+            try {
+                const res = await fetch(`/api/backrooms/sessions/${sessionId}/stats`);
+                if (res.ok) {
+                    const stats = await res.json();
+                    if (stats && Object.keys(stats).length > 0) {
+                        renderStats(stats);
+                    }
+                }
+            } catch (e) { /* non-critical */ }
         },
 
         async resetPrompts(sessionId) {

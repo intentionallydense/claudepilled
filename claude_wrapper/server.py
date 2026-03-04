@@ -679,6 +679,20 @@ async def websocket_backrooms(ws: WebSocket, session_id: str):
                 await ws.send_text(json.dumps({"type": "step_mode_updated", "step_mode": step_mode}))
                 continue
 
+            # Handle thinking toggle
+            if action == "set_thinking":
+                enabled = bool(payload.get("enabled", False))
+                budget = int(payload.get("budget", 10000)) if enabled else None
+                meta = backrooms.db.get_conversation_metadata(session_id) or {}
+                meta["thinking_budget"] = budget
+                backrooms.db.update_conversation_metadata(session_id, meta)
+                await ws.send_text(json.dumps({
+                    "type": "thinking_updated",
+                    "enabled": enabled,
+                    "budget": budget,
+                }))
+                continue
+
             # Handle next-speaker override (one-shot, stored in memory not DB)
             if action == "set_next_speaker":
                 next_speaker = payload.get("speaker", None)
@@ -752,6 +766,7 @@ async def websocket_backrooms(ws: WebSocket, session_id: str):
             pacing_meta = backrooms.db.get_conversation_metadata(session_id) or {}
             br_iterations = pacing_meta.get("iterations", 1)
             br_step_mode = pacing_meta.get("step_mode", False)
+            br_thinking_budget = pacing_meta.get("thinking_budget", None)
             br_next_speaker = pacing_meta.pop("next_speaker", None)
             # Clear next_speaker after reading (one-shot)
             if br_next_speaker:
@@ -765,6 +780,7 @@ async def websocket_backrooms(ws: WebSocket, session_id: str):
                 iterations=br_iterations,
                 step_mode=br_step_mode,
                 next_speaker=br_next_speaker,
+                thinking_budget=br_thinking_budget,
             )
             task = asyncio.create_task(
                 _run_stream_to_completion(

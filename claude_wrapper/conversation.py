@@ -65,17 +65,19 @@ class ConversationManager:
 
         Anthropic providers get Anthropic-format tool definitions. OpenAI-
         compatible providers get OpenAI function-calling format. Web search
-        and prompt caching are Anthropic-only features.
+        works for Anthropic (native) and OpenRouter (:online variant).
+        Prompt caching is Anthropic-only.
         """
         provider = get_provider_for_model(model)
         is_anthropic = provider == "anthropic"
+        has_web_search = provider in ("anthropic", "openrouter")
         client = get_client_for_model(model, self.client)
         raw_tools = self.tools.get_definitions() or None
         if raw_tools and not is_anthropic:
             tool_defs = [t.to_openai_format() for t in raw_tools]
         else:
             tool_defs = raw_tools
-        return client, tool_defs, is_anthropic
+        return client, tool_defs, is_anthropic, has_web_search
 
     async def _get_openrouter_client(self):
         """Lazily create an AsyncOpenAI client for OpenRouter system tasks.
@@ -148,7 +150,7 @@ class ConversationManager:
         conv.messages.append(user_msg)
         self.db.save_message(conversation_id, user_msg)
 
-        client, tool_defs, is_anthropic = self._get_client_and_tools(conv.model)
+        client, tool_defs, is_anthropic, has_web_search = self._get_client_and_tools(conv.model)
         compactions = self._get_compactions(conversation_id)
         api_messages = self._to_api_messages(conv.messages, compactions)
         effective_system = self._get_effective_system_prompt(conv)
@@ -160,7 +162,7 @@ class ConversationManager:
                 model=get_api_model_id(conv.model),
                 system=effective_system,
                 thinking_budget=thinking_budget,
-                web_search=is_anthropic,
+                web_search=has_web_search,
             )
             assistant_msg.parent_id = conv.messages[-1].id
             conv.messages.append(assistant_msg)
@@ -206,7 +208,7 @@ class ConversationManager:
         conv.messages.append(user_msg)
         self.db.save_message(conversation_id, user_msg)
 
-        client, tool_defs, is_anthropic = self._get_client_and_tools(conv.model)
+        client, tool_defs, is_anthropic, has_web_search = self._get_client_and_tools(conv.model)
         compactions = self._get_compactions(conversation_id)
         effective_system = self._get_effective_system_prompt(conv)
 
@@ -228,7 +230,7 @@ class ConversationManager:
                 model=get_api_model_id(conv.model),
                 system=effective_system,
                 thinking_budget=thinking_budget,
-                web_search=is_anthropic,
+                web_search=has_web_search,
             ):
                 # Don't forward MESSAGE_DONE from inner stream — we emit our own
                 if event.type == StreamEventType.MESSAGE_DONE:
@@ -376,7 +378,7 @@ class ConversationManager:
         # Single user message to prime the model — invisible to the user
         api_messages = [{"role": "user", "content": "Go ahead."}]
 
-        client, tool_defs, is_anthropic = self._get_client_and_tools(model)
+        client, tool_defs, is_anthropic, has_web_search = self._get_client_and_tools(model)
         collected_blocks: list[ContentBlock] = []
         text_parts: list[str] = []
         message_input_tokens = 0
@@ -389,7 +391,7 @@ class ConversationManager:
             tools=tool_defs,
             model=get_api_model_id(model),
             system=effective_system,
-            web_search=is_anthropic,
+            web_search=has_web_search,
         ):
             if event.type == StreamEventType.MESSAGE_DONE:
                 continue
@@ -483,7 +485,7 @@ class ConversationManager:
         # Reload conversation from the new leaf
         conv = self.db.load_conversation(conversation_id)
 
-        client, tool_defs, is_anthropic = self._get_client_and_tools(conv.model)
+        client, tool_defs, is_anthropic, has_web_search = self._get_client_and_tools(conv.model)
         compactions = self._get_compactions(conversation_id)
         effective_system = self._get_effective_system_prompt(conv)
 
@@ -505,7 +507,7 @@ class ConversationManager:
                 model=get_api_model_id(conv.model),
                 system=effective_system,
                 thinking_budget=thinking_budget,
-                web_search=is_anthropic,
+                web_search=has_web_search,
             ):
                 # Don't forward MESSAGE_DONE from inner stream — we emit our own
                 if event.type == StreamEventType.MESSAGE_DONE:

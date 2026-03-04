@@ -1335,6 +1335,20 @@ body {
 .sidebar-backdrop.open { display: block; }
 
 /* ------------------------------------------------------------------ */
+/* Backrooms toolbar — thin ribbon above messages for controls         */
+/* ------------------------------------------------------------------ */
+.backrooms-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.4rem 1.5rem;
+    border-bottom: 1px solid #eee;
+    flex-shrink: 0;
+    flex-wrap: wrap;
+    min-height: 0;
+}
+
+/* ------------------------------------------------------------------ */
 /* Backrooms-specific styles (model names, speaker dimming, prompts)   */
 /* ------------------------------------------------------------------ */
 .model-names {
@@ -1398,6 +1412,20 @@ body {
     font-size: 0.7rem;
     color: #888;
 }
+
+/* Speaker-colored tree nodes (backrooms) — match message label colors */
+.tree-node.tree-speaker-model_0 { background: #c05621; width: 12px; height: 12px; }
+.tree-node.tree-speaker-model_1 { background: #2b6cb0; width: 12px; height: 12px; }
+.tree-node.tree-speaker-model_2 { background: #276749; width: 12px; height: 12px; }
+.tree-node.tree-speaker-model_3 { background: #6b46c1; width: 12px; height: 12px; }
+.tree-node.tree-speaker-model_4 { background: #c53030; width: 12px; height: 12px; }
+.tree-node.tree-speaker-curator { background: #aaa; }
+/* on-path overrides — darken the speaker color */
+.tree-node.on-path.tree-speaker-model_0 { background: #c05621; }
+.tree-node.on-path.tree-speaker-model_1 { background: #2b6cb0; }
+.tree-node.on-path.tree-speaker-model_2 { background: #276749; }
+.tree-node.on-path.tree-speaker-model_3 { background: #6b46c1; }
+.tree-node.on-path.tree-speaker-model_4 { background: #c53030; }
 
 /* N-participant speaker colors — model_0 through model_4 */
 .message.speaker-model_0 .role-label { color: #c05621; }
@@ -1550,6 +1578,9 @@ body {
         box-shadow: 2px 0 8px rgba(0,0,0,0.15);
     }
     #sidebar.open { display: flex; }
+
+    /* Toolbar wraps on mobile */
+    .backrooms-toolbar { padding: 0.3rem 0.75rem; }
 
     /* Messages: full width with top padding for hamburger */
     .messages {

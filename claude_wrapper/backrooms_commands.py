@@ -75,13 +75,18 @@ class SessionState:
 # Command parsing — regex-based extraction
 # ---------------------------------------------------------------------------
 
+# Quote characters — models often emit curly/smart quotes instead of straight
+_Q = r'["\u201c\u201d\u201e\u201f`\u2018\u2019]'  # any quote-like char
+# Match content inside quotes — stops at any closing quote char
+_QC = r'[^"\u201c\u201d\u201e\u201f`\u2018\u2019]+'
+
 # Patterns for each command. Order matters — longer matches first.
 _COMMAND_PATTERNS = [
     # !whisper "target" "message"
     (
         "whisper",
         re.compile(
-            r'!whisper\s+"([^"]+)"\s+"([^"]+)"',
+            rf'!whisper\s+{_Q}({_QC}){_Q}\s+{_Q}({_QC}){_Q}',
             re.IGNORECASE,
         ),
     ),
@@ -89,7 +94,7 @@ _COMMAND_PATTERNS = [
     (
         "prompt",
         re.compile(
-            r'!prompt\s+"([^"]+)"',
+            rf'!prompt\s+{_Q}({_QC}){_Q}',
             re.IGNORECASE,
         ),
     ),
@@ -105,7 +110,7 @@ _COMMAND_PATTERNS = [
     (
         "vote",
         re.compile(
-            r'!vote\s+"([^"]+)"\s*\[([^\]]+)\]',
+            rf'!vote\s+{_Q}({_QC}){_Q}\s*\[([^\]]+)\]',
             re.IGNORECASE,
         ),
     ),
@@ -113,7 +118,7 @@ _COMMAND_PATTERNS = [
     (
         "search",
         re.compile(
-            r'!search\s+"([^"]+)"',
+            rf'!search\s+{_Q}({_QC}){_Q}',
             re.IGNORECASE,
         ),
     ),
@@ -121,7 +126,7 @@ _COMMAND_PATTERNS = [
     (
         "image",
         re.compile(
-            r'!image\s+"([^"]+)"',
+            rf'!image\s+{_Q}({_QC}){_Q}',
             re.IGNORECASE,
         ),
     ),
@@ -129,7 +134,7 @@ _COMMAND_PATTERNS = [
     (
         "add_ai",
         re.compile(
-            r'!add_ai\s+"([^"]+)"',
+            rf'!add_ai\s+{_Q}({_QC}){_Q}',
             re.IGNORECASE,
         ),
     ),
@@ -137,7 +142,7 @@ _COMMAND_PATTERNS = [
     (
         "remove_ai",
         re.compile(
-            r'!remove_ai\s+"([^"]+)"',
+            rf'!remove_ai\s+{_Q}({_QC}){_Q}',
             re.IGNORECASE,
         ),
     ),

@@ -451,7 +451,7 @@ class Database:
         """Return all messages as a tree structure with the current path."""
         conn = self._connect()
         rows = conn.execute(
-            "SELECT id, role, content, parent_id, created_at FROM messages WHERE conversation_id = ? ORDER BY created_at",
+            "SELECT id, role, content, parent_id, created_at, speaker FROM messages WHERE conversation_id = ? ORDER BY created_at",
             (conversation_id,),
         ).fetchall()
 
@@ -479,12 +479,16 @@ class Database:
                     preview = "[image]"
             else:
                 preview = str(raw)[:80]
-            nodes.append({
+            node = {
                 "id": row["id"],
                 "role": row["role"],
                 "parent_id": row["parent_id"],
                 "preview": preview,
-            })
+            }
+            # Include speaker for backrooms sessions (null for regular chat)
+            if row["speaker"]:
+                node["speaker"] = row["speaker"]
+            nodes.append(node)
 
         return {"nodes": nodes, "current_path": current_path}
 
