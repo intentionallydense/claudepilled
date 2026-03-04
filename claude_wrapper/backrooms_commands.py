@@ -21,6 +21,7 @@ Used by: backrooms.py (called after each model response)
 
 from __future__ import annotations
 
+import asyncio
 import os
 import re
 from dataclasses import dataclass, field
@@ -279,24 +280,35 @@ async def _handle_search(cmd, speaker, state, client):
     if not api_key:
         return CommandResult(notification="[search unavailable: no API key configured]")
 
-    try:
-        # Use the passed-in Anthropic client for a one-shot web search
-        if client is None:
-            return CommandResult(notification="[search unavailable: no client]")
+    if client is None:
+        return CommandResult(notification="[search unavailable: no client]")
 
-        response = client.send(
-            messages=[{"role": "user", "content": f"Search the web for: {query}\n\nReturn a concise summary of the top results (3-5 key findings)."}],
-            model="claude-haiku-4-5-20251001",
-            web_search=True,
-            max_tokens=1024,
-        )
-        result_text = response.text() if hasattr(response, 'text') else str(response.content)
-        label = _speaker_label(speaker, state)
-        return CommandResult(
-            notification=f'[search results for "{query}" by {label}]:\n{result_text}'
-        )
-    except Exception as e:
-        return CommandResult(notification=f'[search failed: {str(e)[:100]}]')
+    # Retry on transient errors (overloaded, rate limit)
+    last_err = None
+    for attempt in range(3):
+        try:
+            response = client.send(
+                messages=[{"role": "user", "content": f"Search the web for: {query}\n\nReturn a concise summary of the top results (3-5 key findings)."}],
+                model="claude-haiku-4-5-20251001",
+                web_search=True,
+                max_tokens=1024,
+            )
+            result_text = response.text() if hasattr(response, 'text') else str(response.content)
+            label = _speaker_label(speaker, state)
+            return CommandResult(
+                notification=f'[search results for "{query}" by {label}]:\n{result_text}'
+            )
+        except Exception as e:
+            last_err = e
+            err_str = str(e)
+            # Retry on overloaded (529) or rate limit (429)
+            if "overloaded" in err_str.lower() or "529" in err_str or "429" in err_str:
+                await asyncio.sleep(2 ** attempt)
+                continue
+            # Non-retryable error
+            return CommandResult(notification=f'[search failed: {err_str[:100]}]')
+
+    return CommandResult(notification=f'[search failed after retries: {str(last_err)[:100]}]')
 
 
 async def _handle_image(cmd, speaker, state, client):
