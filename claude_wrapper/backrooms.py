@@ -227,6 +227,29 @@ class BackroomsOrchestrator:
     def get_cost(self, session_id: str) -> dict:
         return self.db.get_conversation_cost(session_id)
 
+    def duplicate_session(self, session_id: str) -> dict:
+        """Create a new empty session with the same participants and settings.
+
+        Copies: participants, prompt_ids, speed, iterations, step_mode,
+        thinking_budget. Does NOT copy messages or stats.
+        """
+        raw_meta = self.db.get_conversation_metadata(session_id)
+        meta = _normalize_metadata(raw_meta)
+        participants = meta["participants"]
+
+        # Create new session with same participants
+        resolved = [{"id": p["id"], "label": p["label"]} for p in participants]
+        result = self.create_session(resolved)
+
+        # Copy settings into the new session's metadata
+        new_meta = self.db.get_conversation_metadata(result["id"]) or {}
+        for key in ("prompt_ids", "speed", "iterations", "step_mode", "thinking_budget"):
+            if key in meta:
+                new_meta[key] = meta[key]
+        self.db.update_conversation_metadata(result["id"], new_meta)
+
+        return result
+
     # ------------------------------------------------------------------
     # Prompt resolution — template variable substitution
     # ------------------------------------------------------------------

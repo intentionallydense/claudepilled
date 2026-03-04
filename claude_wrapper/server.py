@@ -539,6 +539,12 @@ async def delete_backrooms_session(session_id: str):
     return {"ok": True}
 
 
+@app.post("/api/backrooms/sessions/{session_id}/duplicate")
+async def duplicate_backrooms_session(session_id: str):
+    """Create a new empty session with the same participants and settings."""
+    return backrooms.duplicate_session(session_id)
+
+
 @app.get("/api/backrooms/sessions/{session_id}/cost")
 async def get_backrooms_session_cost(session_id: str):
     return backrooms.get_cost(session_id)
@@ -723,8 +729,8 @@ async def websocket_backrooms(ws: WebSocket, session_id: str):
             # Edit: branch from a parent, re-send edited curator input
             if action == "edit":
                 parent_id = payload.get("parent_id")
-                if parent_id:
-                    backrooms.db.set_current_leaf(session_id, parent_id)
+                # Always reset leaf — even when parent_id is None (first message edit)
+                backrooms.db.set_current_leaf(session_id, parent_id)
                 content = payload.get("content", "")
                 input_type = payload.get("type", "share")
             # Regenerate: re-run from a curator message's starting point

@@ -312,6 +312,22 @@ async function loadConversations() {
             li.appendChild(typeLabel);
         }
 
+        // Duplicate button for backrooms sessions
+        if (c.type === "backrooms") {
+            const dup = document.createElement("button");
+            dup.className = "delete-btn";
+            dup.textContent = "\u29C9";
+            dup.title = "Duplicate session";
+            dup.style.fontSize = "0.75rem";
+            dup.onclick = async (e) => {
+                e.stopPropagation();
+                const res = await api(`/backrooms/sessions/${c.id}/duplicate`, { method: "POST" });
+                await loadConversations();
+                openConversation(res.id, "backrooms");
+            };
+            li.appendChild(dup);
+        }
+
         const del = document.createElement("button");
         del.className = "delete-btn";
         del.textContent = "\u00d7";
