@@ -10,6 +10,7 @@ Supported commands:
   !whisper "target" "msg"  — private message to one participant
   !mute_self               — skip next turn
   !vote "question" [opts]  — informational poll (no enforcement)
+  !vote "question" "choice" — cast a vote on an existing poll
   !search "query"          — web search via Anthropic API
   !image "description"     — generate image via DALL-E 3
   !add_ai "model_id"       — invite a new AI participant
@@ -106,11 +107,19 @@ _COMMAND_PATTERNS = [
             re.IGNORECASE,
         ),
     ),
-    # !vote "question" [opt1, opt2, ...]
+    # !vote "question" [opt1, opt2, ...] — create a new poll
     (
         "vote",
         re.compile(
             rf'!vote\s+{_Q}({_QC}){_Q}\s*\[([^\]]+)\]',
+            re.IGNORECASE,
+        ),
+    ),
+    # !vote "question" "choice" — cast a vote on an existing poll
+    (
+        "vote_cast",
+        re.compile(
+            rf'!vote\s+{_Q}({_QC}){_Q}\s+{_Q}({_QC}){_Q}',
             re.IGNORECASE,
         ),
     ),
@@ -275,6 +284,16 @@ async def _handle_vote(cmd, speaker, state, client):
     )
 
 
+async def _handle_vote_cast(cmd, speaker, state, client):
+    """!vote "question" "choice" — cast a vote on an existing poll."""
+    question = cmd.args[0] if len(cmd.args) > 0 else ""
+    choice = cmd.args[1] if len(cmd.args) > 1 else ""
+    label = _speaker_label(speaker, state)
+    return CommandResult(
+        notification=f'[{label} votes "{choice}" on "{question}"]'
+    )
+
+
 async def _handle_search(cmd, speaker, state, client):
     """!search "query" — web search via Anthropic API one-shot call."""
     query = cmd.args[0] if cmd.args else ""
@@ -406,6 +425,7 @@ _COMMAND_HANDLERS = {
     "whisper": _handle_whisper,
     "mute_self": _handle_mute_self,
     "vote": _handle_vote,
+    "vote_cast": _handle_vote_cast,
     "search": _handle_search,
     "image": _handle_image,
     "add_ai": _handle_add_ai,

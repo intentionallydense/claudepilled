@@ -79,6 +79,7 @@ Available commands (use sparingly, only when genuinely useful):
 !whisper "target_name" "message" — private message to one participant
 !mute_self — skip your next turn
 !vote "question" [option1, option2, ...] — start a group poll
+!vote "question" "choice" — cast your vote on an existing poll
 !search "query" — search the web (results shared with group)
 !image "description" — generate an image (shared with group)
 !add_ai "model_id" — invite a new AI to the conversation
