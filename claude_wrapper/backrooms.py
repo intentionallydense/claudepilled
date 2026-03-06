@@ -582,6 +582,11 @@ class BackroomsOrchestrator:
                     if hasattr(event, "signature") and event.signature:
                         thinking_signature = event.signature
                     yield event
+                elif event.type in (
+                    StreamEventType.WEB_SEARCH_START,
+                    StreamEventType.WEB_SEARCH_RESULT,
+                ):
+                    yield event
                 elif event.type == StreamEventType.USAGE:
                     turn_input_tokens += event.input_tokens or 0
                     turn_output_tokens += event.output_tokens or 0

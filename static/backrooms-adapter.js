@@ -30,6 +30,7 @@ const BackroomsAdapter = (function () {
     let streamingEl = null;
     let streamingTextEl = null;
     let streamingThinkingEl = null;
+    let streamingSearchEl = null;
     let streamingRawText = "";
     let markdownRenderTimer = null;
     const MARKDOWN_DEBOUNCE_MS = 80;
@@ -581,6 +582,26 @@ const BackroomsAdapter = (function () {
                             streamingThinkingEl = null;
                             return true;
 
+                        case "web_search_start":
+                            if (streamingEl) {
+                                streamingSearchEl = document.createElement("div");
+                                streamingSearchEl.className = "web-search-indicator";
+                                streamingSearchEl.textContent = "searching the web\u2026";
+                                // Insert before the text element so it appears above
+                                streamingEl.insertBefore(streamingSearchEl, streamingTextEl);
+                                maybeScroll();
+                            }
+                            return true;
+
+                        case "web_search_result":
+                            if (streamingSearchEl) {
+                                streamingSearchEl.textContent = "web search complete";
+                                const el = streamingSearchEl;
+                                setTimeout(() => el.remove(), 1500);
+                                streamingSearchEl = null;
+                            }
+                            return true;
+
                         case "text_delta":
                             if (streamingTextEl) {
                                 streamingRawText += event.text;
@@ -601,6 +622,7 @@ const BackroomsAdapter = (function () {
                             streamingEl = null;
                             streamingTextEl = null;
                             streamingThinkingEl = null;
+                            streamingSearchEl = null;
                             return true;
 
                         case "backrooms_command": {
