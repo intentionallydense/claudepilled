@@ -607,21 +607,18 @@ function createChatCore(config) {
                 streamingSearchEl = document.createElement("div");
                 streamingSearchEl.className = "web-search-indicator";
                 streamingSearchEl.textContent = "searching the web...";
-                const textElBefore = streamingEl.querySelector(".message-text");
-                streamingEl.insertBefore(streamingSearchEl, textElBefore);
+                // Append after current text so it appears in-flow
+                streamingEl.appendChild(streamingSearchEl);
                 maybeScrollToBottom();
                 break;
 
             case "web_search_result":
                 if (streamingSearchEl) {
-                    streamingSearchEl.textContent = "web search complete";
-                    setTimeout(() => {
-                        if (streamingSearchEl) {
-                            streamingSearchEl.remove();
-                            streamingSearchEl = null;
-                        }
-                    }, 1500);
+                    streamingSearchEl.textContent = "searched the web";
+                    streamingSearchEl = null;
                 }
+                // Next text_delta starts a fresh text block after the indicator
+                toolResultsSinceLastText = true;
                 break;
 
             case "text_delta":
