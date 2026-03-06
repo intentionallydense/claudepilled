@@ -359,11 +359,12 @@ class ConversationManager:
         conversation_id: str,
         model: str = "claude-haiku-4-5-20251001",
     ) -> AsyncGenerator[StreamEvent, None]:
-        """Generate an initial assistant message with no user input.
+        """Generate an initial assistant message with no prior user input.
 
-        Used for "model speaks first" flows like brain dump — the model
-        reads the system prompt and starts the conversation. Always uses
-        the specified model with no thinking budget.
+        Used for "model speaks first" flows like brain dump — sends the
+        conversation's prompt as the API user message (not saved to history)
+        so the model gets clear instructions instead of "Go ahead." Also
+        updates the conversation model to match what's actually being called.
         """
         conv = self.db.load_conversation(conversation_id)
         if conv is None:
@@ -373,10 +374,22 @@ class ConversationManager:
             yield StreamEvent(type=StreamEventType.ERROR, error="Conversation already has messages")
             return
 
-        effective_system = self._get_effective_system_prompt(conv)
+        # Use the conversation's prompt as the first API message so the model
+        # gets clear instructions instead of a confusing "Go ahead."
+        prompt_text = ""
+        if conv.prompt_id:
+            prompt = self.db.get_prompt(conv.prompt_id)
+            if prompt:
+                prompt_text = prompt["content"]
+        if not prompt_text:
+            prompt_text = conv.system_prompt or "Start the conversation."
 
-        # Single user message to prime the model — invisible to the user
-        api_messages = [{"role": "user", "content": "Go ahead."}]
+        # Update conversation model to reflect what's actually being called
+        self.db.update_conversation_model(conversation_id, model)
+        conv.model = model
+
+        effective_system = self._get_effective_system_prompt(conv)
+        api_messages = [{"role": "user", "content": prompt_text}]
 
         client, tool_defs, is_anthropic, has_web_search = self._get_client_and_tools(model)
         collected_blocks: list[ContentBlock] = []

@@ -707,6 +707,11 @@ function createChatCore(config) {
                     if (roleLabel) roleLabel.textContent = event.model_label;
                 }
 
+                // Update model dropdown if the server changed the model (e.g. init flow)
+                if (event.model_id && el.modelSelect) {
+                    el.modelSelect.value = event.model_id;
+                }
+
                 const wasEdit = !!editingId;
                 streamingEl = null;
                 streamingTextEl = null;
