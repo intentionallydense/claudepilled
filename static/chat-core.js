@@ -555,7 +555,7 @@ function createChatCore(config) {
         // Reset streaming state
         streamingRawText = "";
         markdownRenderTimer = null;
-        if (streamingSearchEl) { streamingSearchEl.remove(); streamingSearchEl = null; }
+        streamingSearchEl = null;
         streamingEl = null;
         streamingTextEl = null;
         streamingThinkingEl = null;
@@ -607,8 +607,7 @@ function createChatCore(config) {
                 streamingSearchEl = document.createElement("div");
                 streamingSearchEl.className = "web-search-indicator";
                 streamingSearchEl.textContent = "searching the web...";
-                // Append after current text so it appears in-flow
-                streamingEl.appendChild(streamingSearchEl);
+                insertBeforeActions(streamingEl, streamingSearchEl);
                 maybeScrollToBottom();
                 break;
 
@@ -624,9 +623,11 @@ function createChatCore(config) {
             case "text_delta":
                 if (!streamingEl) startStreamingMessage();
                 if (toolResultsSinceLastText) {
+                    // Finalize the previous text block — remove its cursor
+                    if (streamingTextEl) removeStreamingCursor(streamingTextEl);
                     streamingTextEl = document.createElement("div");
                     streamingTextEl.className = "message-text";
-                    streamingEl.appendChild(streamingTextEl);
+                    insertBeforeActions(streamingEl, streamingTextEl);
                     streamingRawText = "";
                     toolResultsSinceLastText = false;
                 }
@@ -684,10 +685,7 @@ function createChatCore(config) {
                 }
                 streamingRawText = "";
                 markdownRenderTimer = null;
-                if (streamingSearchEl) {
-                    streamingSearchEl.remove();
-                    streamingSearchEl = null;
-                }
+                streamingSearchEl = null;
                 for (const [id, tc] of Object.entries(streamingToolCalls)) {
                     if (!tc.result) {
                         renderToolCallBlock(streamingEl, tc);
@@ -769,6 +767,16 @@ function createChatCore(config) {
                 maybeScrollToBottom();
                 break;
             }
+        }
+    }
+
+    /** Insert a child element before .message-actions so actions stay at the bottom. */
+    function insertBeforeActions(parentEl, childEl) {
+        const actionsEl = parentEl.querySelector(".message-actions");
+        if (actionsEl) {
+            parentEl.insertBefore(childEl, actionsEl);
+        } else {
+            parentEl.appendChild(childEl);
         }
     }
 
@@ -941,13 +949,7 @@ function createChatCore(config) {
             const newTextEl = document.createElement("div");
             newTextEl.className = "message-text";
             newTextEl.innerHTML = renderMarkdown(textParts.join(""));
-            // Insert before .message-actions so actions stay at the bottom
-            const actionsEl = msgEl.querySelector(".message-actions");
-            if (actionsEl) {
-                msgEl.insertBefore(newTextEl, actionsEl);
-            } else {
-                msgEl.appendChild(newTextEl);
-            }
+            insertBeforeActions(msgEl, newTextEl);
         }
     }
 
@@ -1086,13 +1088,7 @@ function createChatCore(config) {
         }
 
         container.appendChild(body);
-        // Insert before .message-actions so actions stay at the bottom
-        const actionsEl = parentEl.querySelector(".message-actions");
-        if (actionsEl) {
-            parentEl.insertBefore(container, actionsEl);
-        } else {
-            parentEl.appendChild(container);
-        }
+        insertBeforeActions(parentEl, container);
 
         header.onclick = () => {
             header.classList.toggle("open");
