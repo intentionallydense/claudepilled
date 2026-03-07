@@ -12,7 +12,7 @@ from collections.abc import AsyncGenerator
 from pathlib import Path
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -147,6 +147,12 @@ class ChatMessage(BaseModel):
     message: str
 
 
+class SyncChatRequest(BaseModel):
+    """Request body for the synchronous chat endpoint (used by Apple Watch shortcut)."""
+    message: str
+    thinking_budget: int | None = None
+
+
 class EditMessageRequest(BaseModel):
     parent_id: str
     message: str
@@ -170,8 +176,11 @@ async def provider_status():
 
 
 @app.get("/api/conversations")
-async def list_conversations():
-    return manager.list_conversations()
+async def list_conversations(limit: int | None = None):
+    convos = manager.list_conversations()
+    if limit is not None:
+        convos = convos[:limit]
+    return convos
 
 
 @app.post("/api/conversations")
@@ -245,6 +254,37 @@ async def delete_conversation(conversation_id: str):
 @app.get("/api/conversations/{conversation_id}/cost")
 async def get_conversation_cost(conversation_id: str):
     return manager.db.get_conversation_cost(conversation_id)
+
+
+@app.post("/api/chat/{conversation_id}/message")
+async def chat_sync(conversation_id: str, req: SyncChatRequest):
+    """Synchronous chat endpoint — sends a message and returns the full response.
+
+    Consumes stream_chat() internally, collecting all text deltas into a single
+    response. Used by Apple Watch Shortcuts and other HTTP-only clients that
+    can't do WebSocket.
+    """
+    conv = manager.get_conversation(conversation_id)
+    if conv is None:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    text_parts = []
+    title = None
+    async for event in manager.stream_chat(conversation_id, req.message, req.thinking_budget):
+        if event.type == StreamEventType.TEXT_DELTA:
+            text_parts.append(event.text)
+        elif event.type == StreamEventType.TITLE_UPDATE:
+            title = event.text
+        elif event.type == StreamEventType.ERROR:
+            raise HTTPException(status_code=400, detail=event.error)
+
+    # Reload conversation to get current_leaf_id (the assistant message just created)
+    conv = manager.db.load_conversation(conversation_id)
+    return {
+        "text": "".join(text_parts),
+        "message_id": conv.current_leaf_id if conv else None,
+        "title": title or (conv.title if conv else None),
+    }
 
 
 @app.get("/api/conversations/{conversation_id}/tree")
