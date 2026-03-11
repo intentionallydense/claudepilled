@@ -178,7 +178,7 @@ function renderBriefingList() {
         if (item.placeholder) label.style.opacity = "0.4";
         li.appendChild(label);
 
-        li.onclick = () => selectBriefing(item.date);
+        li.onclick = () => { selectBriefing(item.date); toggleSidebar(false); };
         briefingListEl.appendChild(li);
     }
 }
@@ -414,6 +414,47 @@ async function skipItem(series) {
 async function markUnread(series) {
     await briefingApi("POST", `/api/reading-progress/${series}/unread`);
     await loadProgress();
+}
+
+// ---------------------------------------------------------------------------
+// Mobile: hamburger sidebar toggle
+// ---------------------------------------------------------------------------
+const menuBtn = document.getElementById("menu-btn");
+const sidebarBackdrop = document.getElementById("sidebar-backdrop");
+const sidebarEl = document.getElementById("sidebar");
+
+function toggleSidebar(open) {
+    const show = open !== undefined ? open : !sidebarEl.classList.contains("open");
+    sidebarEl.classList.toggle("open", show);
+    sidebarBackdrop.classList.toggle("open", show);
+}
+
+if (menuBtn) menuBtn.onclick = () => toggleSidebar();
+if (sidebarBackdrop) sidebarBackdrop.onclick = () => toggleSidebar(false);
+
+// ---------------------------------------------------------------------------
+// Mobile: tab switching (briefing content vs chat)
+// ---------------------------------------------------------------------------
+const mobileTabs = document.querySelectorAll(".briefing-tab");
+const briefingPanel = document.getElementById("briefing-panel");
+const chatArea = document.getElementById("chat-area");
+
+function switchTab(tab) {
+    mobileTabs.forEach(t => t.classList.toggle("active", t.dataset.tab === tab));
+    if (tab === "briefing") {
+        briefingPanel.classList.remove("mobile-hidden");
+        chatArea.classList.add("mobile-hidden");
+    } else {
+        briefingPanel.classList.add("mobile-hidden");
+        chatArea.classList.remove("mobile-hidden");
+    }
+}
+
+mobileTabs.forEach(t => t.onclick = () => switchTab(t.dataset.tab));
+
+// Default: show briefing tab on mobile, hide chat
+if (window.innerWidth <= 768) {
+    switchTab("briefing");
 }
 
 // ---------------------------------------------------------------------------

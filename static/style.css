@@ -43,8 +43,6 @@ body {
     font-size: 1rem;
     font-weight: 600;
     color: #111;
-    cursor: pointer;
-    user-select: none;
 }
 .sidebar-nav {
     display: flex;
@@ -57,6 +55,23 @@ body {
 /* Sidebar search */
 .sidebar-search-container {
     padding: 1rem 1rem 0;
+}
+
+/* New chat button (below search bar) */
+.new-chat-btn {
+    margin: 0.5rem 1rem 0;
+    padding: 0.35rem 0;
+    width: calc(100% - 2rem);
+    background: none;
+    border: 1px dashed #ccc;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 0.75rem;
+    color: #888;
+}
+.new-chat-btn:hover {
+    border-color: #888;
+    color: #111;
 }
 .sidebar-search {
     width: 100%;

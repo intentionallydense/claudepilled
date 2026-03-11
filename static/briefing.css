@@ -164,3 +164,68 @@
     padding: 4px 0 8px;
     font-style: italic;
 }
+
+/* ------------------------------------------------------------------ */
+/* Mobile tab bar — hidden on desktop, switches between briefing/chat */
+/* ------------------------------------------------------------------ */
+.briefing-mobile-tabs {
+    display: none;
+}
+
+@media (max-width: 768px) {
+    .briefing-mobile-tabs {
+        display: flex;
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        z-index: 50;
+        background: #fff;
+        border-bottom: 1px solid #eee;
+        padding: 0.5rem 1rem;
+        padding-left: 3.5rem; /* room for hamburger */
+        gap: 0.25rem;
+    }
+
+    .briefing-tab {
+        padding: 0.3rem 0.75rem;
+        border: 1px solid #ddd;
+        background: #fff;
+        cursor: pointer;
+        font-family: inherit;
+        font-size: 0.8rem;
+        color: #888;
+    }
+    .briefing-tab.active {
+        background: #111;
+        color: #fff;
+        border-color: #111;
+    }
+
+    /* Override style.css's board-panel hiding for the briefing page.
+       Tab JS controls visibility via .mobile-hidden instead. */
+    #briefing-panel.board-panel {
+        display: block !important;
+        position: static;
+        width: 100%;
+        height: auto;
+        overflow-y: auto;
+        padding: 3.5rem 1rem 2rem; /* top padding for tab bar */
+    }
+    #briefing-panel .board-panel-header {
+        display: flex;
+    }
+    #briefing-panel .board-content {
+        max-height: none;
+    }
+
+    /* Tab visibility — .mobile-hidden toggles which view is shown */
+    .mobile-hidden {
+        display: none !important;
+    }
+
+    /* When chat tab is active, messages need top padding for tab bar */
+    #chat-area .messages {
+        padding-top: 3.5rem;
+    }
+}
