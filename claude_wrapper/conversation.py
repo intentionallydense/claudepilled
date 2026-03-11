@@ -18,6 +18,8 @@ from collections.abc import AsyncGenerator
 from datetime import datetime, timezone
 from typing import Any
 
+from dataclasses import dataclass, field
+
 from claude_wrapper.client import ClaudeClient, get_client_for_model
 from claude_wrapper.db import Database
 from claude_wrapper.models import (
@@ -35,6 +37,23 @@ from claude_wrapper.models import (
 from claude_wrapper.tools import ToolRegistry
 
 log = logging.getLogger(__name__)
+
+
+@dataclass
+class _TurnState:
+    """Mutable accumulator filled during streaming. Passed to _finalize_turn.
+
+    Collects text, thinking, tool use, and token counts from a single
+    streaming API call. The caller reads these after iteration completes.
+    """
+    text_parts: list[str] = field(default_factory=list)
+    thinking_parts: list[str] = field(default_factory=list)
+    thinking_signature: str | None = None
+    pending_tools: dict[str, dict[str, Any]] = field(default_factory=dict)
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cache_creation_tokens: int = 0
+    cache_read_tokens: int = 0
 
 # Model used for cheap system tasks (title generation, compaction summaries).
 # GLM5 via OpenRouter — fast and cheap. Falls back to Anthropic Haiku if
@@ -182,6 +201,130 @@ class ConversationManager:
         return conv.messages[-1].text()
 
     # ------------------------------------------------------------------
+    # Streaming helpers — shared by stream_chat, edit_message, stream_init
+    # ------------------------------------------------------------------
+
+    async def _collect_stream_events(
+        self,
+        *,
+        client,
+        api_messages: list[dict],
+        tool_defs,
+        model_api_id: str,
+        system: str,
+        thinking_budget: int | None = None,
+        web_search: bool = False,
+        state: _TurnState,
+    ) -> AsyncGenerator[StreamEvent, None]:
+        """Stream from the API, yield events, and accumulate state.
+
+        Caller iterates with `async for event in ...` inside their own
+        generator so events propagate naturally. The _TurnState is mutated
+        in-place — caller reads it after iteration completes.
+        """
+        async for event in client.stream(
+            messages=api_messages,
+            tools=tool_defs,
+            model=model_api_id,
+            system=system,
+            thinking_budget=thinking_budget,
+            web_search=web_search,
+        ):
+            if event.type == StreamEventType.MESSAGE_DONE:
+                continue
+            yield event
+
+            if event.type == StreamEventType.TEXT_DELTA and event.text:
+                state.text_parts.append(event.text)
+            elif event.type == StreamEventType.THINKING_DELTA and event.thinking:
+                state.thinking_parts.append(event.thinking)
+            elif event.type == StreamEventType.THINKING_DONE:
+                state.thinking_signature = event.signature
+            elif event.type == StreamEventType.TOOL_USE_START:
+                state.pending_tools[event.tool_use_id] = {
+                    "name": event.tool_name, "input": {},
+                }
+            elif event.type == StreamEventType.TOOL_USE_DELTA:
+                if event.tool_use_id and isinstance(event.tool_input, dict):
+                    state.pending_tools[event.tool_use_id]["input"] = event.tool_input
+            elif event.type == StreamEventType.USAGE:
+                if event.input_tokens:
+                    state.input_tokens = event.input_tokens
+                if event.output_tokens:
+                    state.output_tokens = event.output_tokens
+                if event.cache_creation_input_tokens:
+                    state.cache_creation_tokens = event.cache_creation_input_tokens
+                if event.cache_read_input_tokens:
+                    state.cache_read_tokens = event.cache_read_input_tokens
+
+    def _finalize_turn(
+        self,
+        state: _TurnState,
+        *,
+        conversation_id: str,
+        parent_id: str | None,
+        pricing_model: str,
+        conv_messages: list[Message],
+    ) -> Message | None:
+        """Assemble blocks from _TurnState, compute cost, save message.
+
+        Returns the saved Message, or None if no content was collected.
+        """
+        collected_blocks: list[ContentBlock] = []
+        if state.thinking_parts:
+            collected_blocks.append(ContentBlock(
+                type="thinking",
+                thinking="".join(state.thinking_parts),
+                signature=state.thinking_signature,
+            ))
+        if state.text_parts:
+            collected_blocks.append(ContentBlock(type="text", text="".join(state.text_parts)))
+        for tool_id, tool_info in state.pending_tools.items():
+            collected_blocks.append(ContentBlock(
+                type="tool_use", id=tool_id,
+                name=tool_info["name"], input=tool_info["input"],
+            ))
+
+        if not collected_blocks:
+            return None
+
+        pricing = MODEL_PRICING.get(pricing_model, (3.0, 15.0))
+        input_price, output_price = pricing
+        cost = (
+            state.input_tokens * input_price
+            + state.output_tokens * output_price
+            + state.cache_creation_tokens * (input_price * 1.25)
+            + state.cache_read_tokens * (input_price * 0.1)
+        ) / 1_000_000
+
+        assistant_msg = Message(
+            role="assistant",
+            content=collected_blocks,
+            parent_id=parent_id,
+        )
+        conv_messages.append(assistant_msg)
+        self.db.save_message(
+            conversation_id, assistant_msg,
+            input_tokens=state.input_tokens,
+            output_tokens=state.output_tokens,
+            cost=cost,
+            cache_creation_input_tokens=state.cache_creation_tokens,
+            cache_read_input_tokens=state.cache_read_tokens,
+        )
+        return assistant_msg
+
+    def _make_usage_event(self, conversation_id: str) -> StreamEvent:
+        """Build a USAGE event with conversation totals."""
+        conv_cost = self.db.get_conversation_cost(conversation_id)
+        return StreamEvent(
+            type=StreamEventType.USAGE,
+            input_tokens=conv_cost["input_tokens"],
+            output_tokens=conv_cost["output_tokens"],
+            cache_creation_input_tokens=conv_cost["cache_creation_tokens"],
+            cache_read_input_tokens=conv_cost["cache_read_tokens"],
+        )
+
+    # ------------------------------------------------------------------
     # Streaming chat
     # ------------------------------------------------------------------
 
@@ -197,13 +340,9 @@ class ConversationManager:
             yield StreamEvent(type=StreamEventType.ERROR, error="Conversation not found")
             return
 
-        # Track whether this is the first user message (for auto-title)
         is_first_message = len(conv.messages) == 0
-
-        # Build message content — string stays as-is, list becomes ContentBlocks
         msg_content = self._normalize_user_content(user_content)
 
-        # Append user message with parent = current leaf
         user_msg = Message(role="user", content=msg_content, parent_id=conv.current_leaf_id)
         conv.messages.append(user_msg)
         self.db.save_message(conversation_id, user_msg)
@@ -214,140 +353,49 @@ class ConversationManager:
 
         for _ in range(10):
             api_messages = self._to_api_messages(conv.messages, compactions)
-            collected_blocks: list[ContentBlock] = []
-            text_parts: list[str] = []
-            thinking_parts: list[str] = []
-            thinking_signature: str | None = None
-            pending_tools: dict[str, dict[str, Any]] = {}
-            message_input_tokens: int = 0
-            message_output_tokens: int = 0
-            cache_creation_tokens: int = 0
-            cache_read_tokens: int = 0
-
-            async for event in client.stream(
-                messages=api_messages,
-                tools=tool_defs,
-                model=get_api_model_id(conv.model),
-                system=effective_system,
-                thinking_budget=thinking_budget,
-                web_search=has_web_search,
+            state = _TurnState()
+            async for event in self._collect_stream_events(
+                client=client, api_messages=api_messages, tool_defs=tool_defs,
+                model_api_id=get_api_model_id(conv.model), system=effective_system,
+                thinking_budget=thinking_budget, web_search=has_web_search, state=state,
             ):
-                # Don't forward MESSAGE_DONE from inner stream — we emit our own
-                if event.type == StreamEventType.MESSAGE_DONE:
-                    continue
                 yield event
 
-                if event.type == StreamEventType.TEXT_DELTA and event.text:
-                    text_parts.append(event.text)
+            self._finalize_turn(
+                state, conversation_id=conversation_id,
+                parent_id=conv.messages[-1].id, pricing_model=conv.model,
+                conv_messages=conv.messages,
+            )
 
-                elif event.type == StreamEventType.THINKING_DELTA and event.thinking:
-                    thinking_parts.append(event.thinking)
-
-                elif event.type == StreamEventType.THINKING_DONE:
-                    thinking_signature = event.signature
-
-                elif event.type == StreamEventType.TOOL_USE_START:
-                    pending_tools[event.tool_use_id] = {
-                        "name": event.tool_name,
-                        "input": {},
-                    }
-
-                elif event.type == StreamEventType.TOOL_USE_DELTA:
-                    if event.tool_use_id and isinstance(event.tool_input, dict):
-                        pending_tools[event.tool_use_id]["input"] = event.tool_input
-
-                elif event.type == StreamEventType.USAGE:
-                    if event.input_tokens:
-                        message_input_tokens = event.input_tokens
-                    if event.output_tokens:
-                        message_output_tokens = event.output_tokens
-                    if event.cache_creation_input_tokens:
-                        cache_creation_tokens = event.cache_creation_input_tokens
-                    if event.cache_read_input_tokens:
-                        cache_read_tokens = event.cache_read_input_tokens
-
-            # Build the assistant message
-            if thinking_parts:
-                collected_blocks.append(ContentBlock(
-                    type="thinking",
-                    thinking="".join(thinking_parts),
-                    signature=thinking_signature,
-                ))
-            if text_parts:
-                collected_blocks.append(ContentBlock(type="text", text="".join(text_parts)))
-            for tool_id, tool_info in pending_tools.items():
-                collected_blocks.append(ContentBlock(
-                    type="tool_use",
-                    id=tool_id,
-                    name=tool_info["name"],
-                    input=tool_info["input"],
-                ))
-
-            # Compute cost — cache writes cost 1.25x input, cache reads cost 0.1x input
-            pricing = MODEL_PRICING.get(conv.model, (3.0, 15.0))
-            input_price, output_price = pricing
-            cost = (
-                message_input_tokens * input_price
-                + message_output_tokens * output_price
-                + cache_creation_tokens * (input_price * 1.25)
-                + cache_read_tokens * (input_price * 0.1)
-            ) / 1_000_000
-
-            if collected_blocks:
-                assistant_msg = Message(
-                    role="assistant",
-                    content=collected_blocks,
-                    parent_id=conv.messages[-1].id,
-                )
-                conv.messages.append(assistant_msg)
-                self.db.save_message(
-                    conversation_id,
-                    assistant_msg,
-                    input_tokens=message_input_tokens,
-                    output_tokens=message_output_tokens,
-                    cost=cost,
-                    cache_creation_input_tokens=cache_creation_tokens,
-                    cache_read_input_tokens=cache_read_tokens,
-                )
-
-            if not pending_tools:
+            if not state.pending_tools:
                 break
 
-            # Execute tools
-            tool_use_blocks = [b for b in collected_blocks if b.type == "tool_use"]
-            tool_results = self._execute_tool_blocks(tool_use_blocks)
-
+            # Execute tools and stream results
+            tool_blocks = [
+                b for b in conv.messages[-1].content
+                if isinstance(b, ContentBlock) and b.type == "tool_use"
+            ]
+            tool_results = self._execute_tool_blocks(tool_blocks)
             for result_block in tool_results:
                 yield StreamEvent(
                     type=StreamEventType.TOOL_RESULT,
                     tool_use_id=result_block.tool_use_id,
                     tool_result=result_block.content,
                 )
-
             tool_msg = Message(
-                role="user",
-                content=tool_results,
+                role="user", content=tool_results,
                 parent_id=conv.messages[-1].id,
             )
             conv.messages.append(tool_msg)
             self.db.save_message(conversation_id, tool_msg)
 
-        # Auto-generate title after first exchange
         if is_first_message:
             title_text = user_msg.text() if isinstance(msg_content, list) else str(user_content)
             title = await self._generate_title(title_text)
             self.db.update_conversation_title(conversation_id, title)
             yield StreamEvent(type=StreamEventType.TITLE_UPDATE, text=title)
 
-        # Emit final usage with conversation totals
-        conv_cost = self.db.get_conversation_cost(conversation_id)
-        yield StreamEvent(
-            type=StreamEventType.USAGE,
-            input_tokens=conv_cost["input_tokens"],
-            output_tokens=conv_cost["output_tokens"],
-            cache_creation_input_tokens=conv_cost["cache_creation_tokens"],
-            cache_read_input_tokens=conv_cost["cache_read_tokens"],
-        )
+        yield self._make_usage_event(conversation_id)
         yield StreamEvent(type=StreamEventType.MESSAGE_DONE)
 
     # ------------------------------------------------------------------
@@ -374,8 +422,6 @@ class ConversationManager:
             yield StreamEvent(type=StreamEventType.ERROR, error="Conversation already has messages")
             return
 
-        # Use the conversation's prompt as the first API message so the model
-        # gets clear instructions instead of a confusing "Go ahead."
         prompt_text = ""
         if conv.prompt_id:
             prompt = self.db.get_prompt(conv.prompt_id)
@@ -384,87 +430,30 @@ class ConversationManager:
         if not prompt_text:
             prompt_text = conv.system_prompt or "Start the conversation."
 
-        # Update conversation model to reflect what's actually being called
         self.db.update_conversation_model(conversation_id, model)
         conv.model = model
 
         effective_system = self._get_effective_system_prompt(conv)
         api_messages = [{"role": "user", "content": prompt_text}]
-
         client, tool_defs, is_anthropic, has_web_search = self._get_client_and_tools(model)
-        collected_blocks: list[ContentBlock] = []
-        text_parts: list[str] = []
-        message_input_tokens = 0
-        message_output_tokens = 0
-        cache_creation_tokens = 0
-        cache_read_tokens = 0
 
-        async for event in client.stream(
-            messages=api_messages,
-            tools=tool_defs,
-            model=get_api_model_id(model),
-            system=effective_system,
-            web_search=has_web_search,
+        state = _TurnState()
+        async for event in self._collect_stream_events(
+            client=client, api_messages=api_messages, tool_defs=tool_defs,
+            model_api_id=get_api_model_id(model), system=effective_system,
+            web_search=has_web_search, state=state,
         ):
-            if event.type == StreamEventType.MESSAGE_DONE:
-                continue
             yield event
 
-            if event.type == StreamEventType.TEXT_DELTA and event.text:
-                text_parts.append(event.text)
-            elif event.type == StreamEventType.USAGE:
-                if event.input_tokens:
-                    message_input_tokens = event.input_tokens
-                if event.output_tokens:
-                    message_output_tokens = event.output_tokens
-                if event.cache_creation_input_tokens:
-                    cache_creation_tokens = event.cache_creation_input_tokens
-                if event.cache_read_input_tokens:
-                    cache_read_tokens = event.cache_read_input_tokens
-
-        if text_parts:
-            collected_blocks.append(ContentBlock(type="text", text="".join(text_parts)))
-
-        pricing = MODEL_PRICING.get(model, (5.0, 25.0))
-        input_price, output_price = pricing
-        cost = (
-            message_input_tokens * input_price
-            + message_output_tokens * output_price
-            + cache_creation_tokens * (input_price * 1.25)
-            + cache_read_tokens * (input_price * 0.1)
-        ) / 1_000_000
-
-        if collected_blocks:
-            assistant_msg = Message(
-                role="assistant",
-                content=collected_blocks,
-                parent_id=None,
-            )
-            conv.messages.append(assistant_msg)
-            self.db.save_message(
-                conversation_id, assistant_msg,
-                input_tokens=message_input_tokens,
-                output_tokens=message_output_tokens,
-                cost=cost,
-                cache_creation_input_tokens=cache_creation_tokens,
-                cache_read_input_tokens=cache_read_tokens,
-            )
-
-        conv_cost = self.db.get_conversation_cost(conversation_id)
-        yield StreamEvent(
-            type=StreamEventType.USAGE,
-            input_tokens=conv_cost["input_tokens"],
-            output_tokens=conv_cost["output_tokens"],
-            cache_creation_input_tokens=conv_cost["cache_creation_tokens"],
-            cache_read_input_tokens=conv_cost["cache_read_tokens"],
+        self._finalize_turn(
+            state, conversation_id=conversation_id,
+            parent_id=None, pricing_model=model,
+            conv_messages=conv.messages,
         )
-        # Include actual model used so the frontend can label it correctly
-        model_name = None
-        for m in AVAILABLE_MODELS:
-            if m["id"] == model:
-                model_name = m["name"]
-                break
-        yield StreamEvent(type=StreamEventType.MESSAGE_DONE, model_id=model, model_label=model_name or model)
+
+        yield self._make_usage_event(conversation_id)
+        model_name = next((m["name"] for m in AVAILABLE_MODELS if m["id"] == model), model)
+        yield StreamEvent(type=StreamEventType.MESSAGE_DONE, model_id=model, model_label=model_name)
 
     # ------------------------------------------------------------------
     # Edit message (create a branch)
@@ -488,10 +477,7 @@ class ConversationManager:
             yield StreamEvent(type=StreamEventType.ERROR, error="Conversation not found")
             return
 
-        # Build message content — string stays as-is, list becomes ContentBlocks
         msg_content = self._normalize_user_content(new_content)
-
-        # Create new user message branching from parent_id
         user_msg = Message(role="user", content=msg_content, parent_id=parent_id)
         self.db.save_message(conversation_id, user_msg)
 
@@ -504,107 +490,42 @@ class ConversationManager:
 
         for _ in range(10):
             api_messages = self._to_api_messages(conv.messages, compactions)
-            collected_blocks: list[ContentBlock] = []
-            text_parts: list[str] = []
-            thinking_parts: list[str] = []
-            thinking_signature: str | None = None
-            pending_tools: dict[str, dict[str, Any]] = {}
-            message_input_tokens: int = 0
-            message_output_tokens: int = 0
-            cache_creation_tokens: int = 0
-            cache_read_tokens: int = 0
-
-            async for event in client.stream(
-                messages=api_messages,
-                tools=tool_defs,
-                model=get_api_model_id(conv.model),
-                system=effective_system,
-                thinking_budget=thinking_budget,
-                web_search=has_web_search,
+            state = _TurnState()
+            async for event in self._collect_stream_events(
+                client=client, api_messages=api_messages, tool_defs=tool_defs,
+                model_api_id=get_api_model_id(conv.model), system=effective_system,
+                thinking_budget=thinking_budget, web_search=has_web_search, state=state,
             ):
-                # Don't forward MESSAGE_DONE from inner stream — we emit our own
-                if event.type == StreamEventType.MESSAGE_DONE:
-                    continue
                 yield event
 
-                if event.type == StreamEventType.TEXT_DELTA and event.text:
-                    text_parts.append(event.text)
-                elif event.type == StreamEventType.THINKING_DELTA and event.thinking:
-                    thinking_parts.append(event.thinking)
-                elif event.type == StreamEventType.THINKING_DONE:
-                    thinking_signature = event.signature
-                elif event.type == StreamEventType.TOOL_USE_START:
-                    pending_tools[event.tool_use_id] = {"name": event.tool_name, "input": {}}
-                elif event.type == StreamEventType.TOOL_USE_DELTA:
-                    if event.tool_use_id and isinstance(event.tool_input, dict):
-                        pending_tools[event.tool_use_id]["input"] = event.tool_input
-                elif event.type == StreamEventType.USAGE:
-                    if event.input_tokens:
-                        message_input_tokens = event.input_tokens
-                    if event.output_tokens:
-                        message_output_tokens = event.output_tokens
-                    if event.cache_creation_input_tokens:
-                        cache_creation_tokens = event.cache_creation_input_tokens
-                    if event.cache_read_input_tokens:
-                        cache_read_tokens = event.cache_read_input_tokens
+            self._finalize_turn(
+                state, conversation_id=conversation_id,
+                parent_id=conv.messages[-1].id, pricing_model=conv.model,
+                conv_messages=conv.messages,
+            )
 
-            if thinking_parts:
-                collected_blocks.append(ContentBlock(
-                    type="thinking",
-                    thinking="".join(thinking_parts),
-                    signature=thinking_signature,
-                ))
-            if text_parts:
-                collected_blocks.append(ContentBlock(type="text", text="".join(text_parts)))
-            for tool_id, tool_info in pending_tools.items():
-                collected_blocks.append(ContentBlock(
-                    type="tool_use", id=tool_id, name=tool_info["name"], input=tool_info["input"],
-                ))
-
-            pricing = MODEL_PRICING.get(conv.model, (3.0, 15.0))
-            input_price, output_price = pricing
-            cost = (
-                message_input_tokens * input_price
-                + message_output_tokens * output_price
-                + cache_creation_tokens * (input_price * 1.25)
-                + cache_read_tokens * (input_price * 0.1)
-            ) / 1_000_000
-
-            if collected_blocks:
-                assistant_msg = Message(
-                    role="assistant", content=collected_blocks,
-                    parent_id=conv.messages[-1].id,
-                )
-                conv.messages.append(assistant_msg)
-                self.db.save_message(
-                    conversation_id, assistant_msg, message_input_tokens, message_output_tokens, cost,
-                    cache_creation_input_tokens=cache_creation_tokens,
-                    cache_read_input_tokens=cache_read_tokens,
-                )
-
-            if not pending_tools:
+            if not state.pending_tools:
                 break
 
-            tool_use_blocks = [b for b in collected_blocks if b.type == "tool_use"]
-            tool_results = self._execute_tool_blocks(tool_use_blocks)
+            tool_blocks = [
+                b for b in conv.messages[-1].content
+                if isinstance(b, ContentBlock) and b.type == "tool_use"
+            ]
+            tool_results = self._execute_tool_blocks(tool_blocks)
             for result_block in tool_results:
                 yield StreamEvent(
                     type=StreamEventType.TOOL_RESULT,
                     tool_use_id=result_block.tool_use_id,
                     tool_result=result_block.content,
                 )
-            tool_msg = Message(role="user", content=tool_results, parent_id=conv.messages[-1].id)
+            tool_msg = Message(
+                role="user", content=tool_results,
+                parent_id=conv.messages[-1].id,
+            )
             conv.messages.append(tool_msg)
             self.db.save_message(conversation_id, tool_msg)
 
-        conv_cost = self.db.get_conversation_cost(conversation_id)
-        yield StreamEvent(
-            type=StreamEventType.USAGE,
-            input_tokens=conv_cost["input_tokens"],
-            output_tokens=conv_cost["output_tokens"],
-            cache_creation_input_tokens=conv_cost["cache_creation_tokens"],
-            cache_read_input_tokens=conv_cost["cache_read_tokens"],
-        )
+        yield self._make_usage_event(conversation_id)
         yield StreamEvent(type=StreamEventType.MESSAGE_DONE)
 
     # ------------------------------------------------------------------

@@ -108,11 +108,6 @@ async def startup():
     init_briefing_routes(briefing_db, task_db, client, manager)
     backrooms = BackroomsOrchestrator(client=client, db=db, file_db=file_db_instance, pin_db=pin_db_instance)
 
-    # Migrate old setting key → new name (one-time, idempotent)
-    old_val = db.get_setting("default_system_prompt")
-    if old_val is not None and db.get_setting("universal_prompt") is None:
-        db.set_setting("universal_prompt", old_val)
-
     # Seed built-in "Brain dump" prompt if it doesn't exist yet
     if db.get_prompt("brain_dump") is None:
         db.save_prompt("brain_dump", "Brain dump", BRAIN_DUMP_PROMPT)
@@ -141,10 +136,6 @@ class UpdateConversationRequest(BaseModel):
     system_prompt: str | None = None
     prompt_id: str | None = None
     clear_prompt: bool = False  # set True to remove the saved prompt
-
-
-class ChatMessage(BaseModel):
-    message: str
 
 
 class SyncChatRequest(BaseModel):
@@ -220,7 +211,8 @@ async def get_conversation(conversation_id: str):
     if type_row:
         data["type"] = type_row["type"] or "chat"
         if type_row["metadata"]:
-            data["_metadata"] = json.loads(type_row["metadata"])
+            from claude_wrapper.backrooms import _normalize_metadata
+            data["_metadata"] = _normalize_metadata(json.loads(type_row["metadata"]))
     return data
 
 
@@ -545,11 +537,7 @@ async def couch_redirect():
 # ---------------------------------------------------------------------------
 
 class CreateBackroomsSessionRequest(BaseModel):
-    # v2: list of model IDs (2-5 participants)
-    participants: list[str] | None = None
-    # v1 compat: two-model shorthand
-    model_a: str = "claude-opus-4-6"
-    model_b: str = "claude-3-opus-20240229"
+    participants: list[str]  # list of model IDs (2-5 participants)
 
 
 @app.get("/api/backrooms/sessions")
@@ -559,10 +547,8 @@ async def list_backrooms_sessions():
 
 @app.post("/api/backrooms/sessions")
 async def create_backrooms_session(req: CreateBackroomsSessionRequest):
-    if req.participants:
-        parts = [{"id": mid} for mid in req.participants]
-        return backrooms.create_session(participants=parts)
-    return backrooms.create_session(model_a_id=req.model_a, model_b_id=req.model_b)
+    parts = [{"id": mid} for mid in req.participants]
+    return backrooms.create_session(participants=parts)
 
 
 @app.get("/api/backrooms/sessions/{session_id}")
@@ -592,30 +578,17 @@ async def get_backrooms_session_cost(session_id: str):
 
 @app.get("/api/backrooms/sessions/{session_id}/prompts")
 async def get_backrooms_prompts(session_id: str):
-    """Get prompt IDs for a backrooms session. Supports both v1 (a/b) and v2 (seat indices)."""
+    """Get prompt IDs for a backrooms session (v2 seat-indexed format)."""
     meta = backrooms.db.get_conversation_metadata(session_id)
     if meta is None:
         return JSONResponse(status_code=404, content={"error": "Not found"})
-    # Return v2 format (prompt_ids dict) plus v1 compat
     from claude_wrapper.backrooms import _normalize_metadata
     normalized = _normalize_metadata(meta)
-    prompt_ids = normalized.get("prompt_ids", {})
-    return {
-        "prompt_ids": prompt_ids,
-        # v1 compat
-        "prompt_id_a": prompt_ids.get("0") or meta.get("prompt_id_a"),
-        "prompt_id_b": prompt_ids.get("1") or meta.get("prompt_id_b"),
-    }
+    return {"prompt_ids": normalized.get("prompt_ids", {})}
 
 
 class UpdateBackroomsPromptsRequest(BaseModel):
-    # v2: dict of seat_index → prompt_id
-    prompt_ids: dict[str, str] | None = None
-    # v1 compat
-    prompt_a: str | None = None
-    prompt_b: str | None = None
-    prompt_id_a: str | None = None
-    prompt_id_b: str | None = None
+    prompt_ids: dict[str, str]  # seat_index → prompt_id (empty string to reset)
 
 
 @app.patch("/api/backrooms/sessions/{session_id}/prompts")
@@ -625,41 +598,10 @@ async def update_backrooms_prompts(session_id: str, req: UpdateBackroomsPromptsR
     if meta is None:
         return JSONResponse(status_code=404, content={"error": "Not found"})
 
-    # Handle v2 format (seat indices)
-    if req.prompt_ids is not None:
-        if "prompt_ids" not in meta:
-            meta["prompt_ids"] = {}
-        for seat_idx, pid in req.prompt_ids.items():
-            meta["prompt_ids"][seat_idx] = pid if pid else None
-            # Also update v1 compat fields for old sessions
-            legacy_key = {"0": "prompt_id_a", "1": "prompt_id_b"}.get(seat_idx)
-            if legacy_key:
-                meta[legacy_key] = pid if pid else None
-                if pid:
-                    legacy_prompt_key = {"0": "system_prompt_a", "1": "system_prompt_b"}.get(seat_idx)
-                    if legacy_prompt_key:
-                        meta.pop(legacy_prompt_key, None)
-
-    # Handle v1 compat fields
-    if req.prompt_a is not None:
-        meta["system_prompt_a"] = req.prompt_a if req.prompt_a else None
-    if req.prompt_b is not None:
-        meta["system_prompt_b"] = req.prompt_b if req.prompt_b else None
-    if req.prompt_id_a is not None:
-        meta["prompt_id_a"] = req.prompt_id_a if req.prompt_id_a else None
-        if req.prompt_id_a:
-            meta.pop("system_prompt_a", None)
-        # Sync to v2
-        if "prompt_ids" not in meta:
-            meta["prompt_ids"] = {}
-        meta["prompt_ids"]["0"] = req.prompt_id_a if req.prompt_id_a else None
-    if req.prompt_id_b is not None:
-        meta["prompt_id_b"] = req.prompt_id_b if req.prompt_id_b else None
-        if req.prompt_id_b:
-            meta.pop("system_prompt_b", None)
-        if "prompt_ids" not in meta:
-            meta["prompt_ids"] = {}
-        meta["prompt_ids"]["1"] = req.prompt_id_b if req.prompt_id_b else None
+    if "prompt_ids" not in meta:
+        meta["prompt_ids"] = {}
+    for seat_idx, pid in req.prompt_ids.items():
+        meta["prompt_ids"][seat_idx] = pid if pid else None
 
     backrooms.db.update_conversation_metadata(session_id, meta)
     return {"ok": True}

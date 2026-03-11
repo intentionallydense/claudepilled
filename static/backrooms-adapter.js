@@ -40,46 +40,22 @@ const BackroomsAdapter = (function () {
     // -----------------------------------------------------------------------
     function getParticipants() {
         if (!sessionMeta) return [];
-        // v2 format
-        if (sessionMeta.participants) return sessionMeta.participants;
-        // v1 compat
-        const parts = [];
-        if (sessionMeta.model_a) {
-            parts.push({ seat: 0, id: sessionMeta.model_a.id, label: sessionMeta.model_a.label, speaker: "model_0" });
-        }
-        if (sessionMeta.model_b) {
-            parts.push({ seat: 1, id: sessionMeta.model_b.id, label: sessionMeta.model_b.label, speaker: "model_1" });
-        }
-        return parts;
+        return sessionMeta.participants || [];
     }
 
     function getModelLabels() {
         const parts = getParticipants();
-        // v1 compat return format
         const result = {};
         for (const p of parts) {
-            // Support both model_0/model_1 and model_a/model_b
             result[p.speaker] = p.label;
-            if (p.seat === 0) result.model_a = p.label;
-            if (p.seat === 1) result.model_b = p.label;
         }
         return result;
     }
 
     function getSpeakerLabel(speaker) {
         const parts = getParticipants();
-        // Try direct match on speaker field
         for (const p of parts) {
             if (p.speaker === speaker) return p.label;
-        }
-        // v1 compat
-        if (speaker === "model_a") {
-            const a = parts.find(p => p.seat === 0);
-            return a ? a.label : "Model A";
-        }
-        if (speaker === "model_b") {
-            const b = parts.find(p => p.seat === 1);
-            return b ? b.label : "Model B";
         }
         if (speaker === "curator") return "you";
         if (speaker === "system" || speaker === "command") return "";
@@ -874,9 +850,6 @@ const BackroomsAdapter = (function () {
                 });
                 const data = await res.json();
                 promptIds = data.prompt_ids || {};
-                // v1 compat
-                if (!promptIds["0"] && data.prompt_id_a) promptIds["0"] = data.prompt_id_a;
-                if (!promptIds["1"] && data.prompt_id_b) promptIds["1"] = data.prompt_id_b;
             } catch (e) { /* ignore */ }
 
             // Dynamically generate seat dropdowns
@@ -980,7 +953,7 @@ const BackroomsAdapter = (function () {
             await fetch(`/api/backrooms/sessions/${sessionId}/prompts`, {
                 method: "PATCH",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ prompt_ids: promptIds, prompt_a: "", prompt_b: "" }),
+                body: JSON.stringify({ prompt_ids: promptIds }),
             });
             // Reset dropdowns
             const modal = document.getElementById("backrooms-prompts-modal");

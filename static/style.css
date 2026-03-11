@@ -1448,7 +1448,7 @@ body {
 .message.speaker-model_2 .role-label { color: #276749; }
 .message.speaker-model_3 .role-label { color: #6b46c1; }
 .message.speaker-model_4 .role-label { color: #c53030; }
-/* Legacy speaker names (backwards compat with old sessions) */
+/* Old sessions may have messages with model_a/model_b speaker values in the DB */
 .message.speaker-model_a .role-label { color: #c05621; }
 .message.speaker-model_b .role-label { color: #2b6cb0; }
 

@@ -169,23 +169,12 @@ class BackroomsOrchestrator:
 
     def create_session(
         self,
-        participants: list[dict] | None = None,
-        *,
-        # Legacy compat — used when participants is None
-        model_a_id: str | None = None,
-        model_b_id: str | None = None,
+        participants: list[dict],
     ) -> dict:
         """Create a new backrooms session (conversation with type='backrooms').
 
         participants: list of {"id": model_id} dicts (2-5 items).
-        Falls back to model_a_id/model_b_id for backwards compat.
         """
-        if participants is None:
-            # Legacy 2-model creation
-            a_id = model_a_id or DEFAULT_PARTICIPANTS[0]["id"]
-            b_id = model_b_id or DEFAULT_PARTICIPANTS[1]["id"]
-            participants = [{"id": a_id}, {"id": b_id}]
-
         if len(participants) < 2 or len(participants) > MAX_PARTICIPANTS:
             raise ValueError(f"Need 2-{MAX_PARTICIPANTS} participants, got {len(participants)}")
 
@@ -198,11 +187,6 @@ class BackroomsOrchestrator:
             })
 
         meta = _build_participants_meta(resolved)
-
-        # Also store v1 compat fields for existing frontend code
-        if len(resolved) >= 2:
-            meta["model_a"] = {"id": resolved[0]["id"], "label": resolved[0]["label"]}
-            meta["model_b"] = {"id": resolved[1]["id"], "label": resolved[1]["label"]}
 
         # Build title from short labels
         short_labels = [p["label"].replace("Claude ", "") for p in resolved]
