@@ -20,6 +20,16 @@ body {
     height: 100vh;
 }
 
+/* Simplified 2-column layout for settings/tasks — sidebar + scrollable content */
+.app-simple {
+    grid-template-columns: 200px 1fr;
+}
+.app-simple .page-content {
+    overflow-y: auto;
+    padding: 2rem 3rem;
+    max-width: 700px;
+}
+
 /* ------------------------------------------------------------------ */
 /* Left sidebar                                                       */
 /* ------------------------------------------------------------------ */
@@ -989,17 +999,34 @@ body {
 .form-textarea:focus { outline: none; border-color: #111; }
 .form-textarea::placeholder { color: #aaa; }
 
+.form-input {
+    background: #fff;
+    color: #111;
+    border: 1px solid #ddd;
+    padding: 0.35rem 0.5rem;
+    font-family: inherit;
+    font-size: 0.8rem;
+}
+.form-input:focus { outline: none; border-color: #111; }
+.form-input::placeholder { color: #aaa; }
+
+.form-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
 .btn-dark {
-    width: 100%;
-    padding: 0.5rem;
+    padding: 0.4rem 1.25rem;
     background: #111;
     color: #fff;
     border: none;
     cursor: pointer;
     font-family: inherit;
-    font-size: 0.85rem;
+    font-size: 0.8rem;
 }
 .btn-dark:hover { background: #333; }
+.modal-body .btn-dark { width: 100%; padding: 0.5rem; }
 
 .tools-list {
     padding: 1rem;
@@ -1616,5 +1643,10 @@ body {
 
     #conversation-list li .delete-btn {
         opacity: 1;
+    }
+
+    /* Simple pages: full-width content with top padding for hamburger */
+    .app-simple .page-content {
+        padding: 3rem 1rem 1rem;
     }
 }

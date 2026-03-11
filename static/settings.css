@@ -1,150 +1,18 @@
 /* ------------------------------------------------------------------ */
-/* settings.css — Standalone settings page. Self-contained because    */
-/* style.css body rules (overflow:hidden) don't suit a scrollable     */
-/* single-column page. Component values kept in sync with style.css.  */
+/* settings.css — Settings page overrides. Loaded after style.css     */
+/* which provides the sidebar layout, base typography, and shared     */
+/* component styles (buttons, inputs, form labels).                   */
 /* ------------------------------------------------------------------ */
 
 /* ------------------------------------------------------------------ */
-/* Reset & base — matches style.css                                   */
+/* Form component overrides — wider spacing for full-page forms       */
 /* ------------------------------------------------------------------ */
-*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
-body {
-    font-family: "SF Mono", Monaco, Consolas, "Courier New", monospace;
-    font-size: 14px;
-    line-height: 1.6;
-    background: #fff;
-    color: #111;
-    min-height: 100vh;
-}
-
-/* ------------------------------------------------------------------ */
-/* Page layout                                                        */
-/* ------------------------------------------------------------------ */
-#settings-page {
-    max-width: 640px;
-    margin: 0 auto;
-    padding: 3rem 1.5rem;
-}
-
-/* ------------------------------------------------------------------ */
-/* Header                                                             */
-/* ------------------------------------------------------------------ */
-.settings-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 2.5rem;
-    padding-bottom: 1rem;
-    border-bottom: 1px solid #eee;
-}
-
-.settings-title {
-    font-size: 1rem;
-    font-weight: 600;
-    color: #111;
-}
-
-.settings-nav {
-    display: flex;
-    gap: 1rem;
-}
-
-.nav-link {
-    color: #888;
-    text-decoration: none;
-    font-size: 0.75rem;
-}
-.nav-link:hover { color: #111; text-decoration: underline; }
-
-/* ------------------------------------------------------------------ */
-/* Form components — synced with style.css values                     */
-/* ------------------------------------------------------------------ */
-.form-label {
-    display: block;
-    font-size: 0.7rem;
-    color: #888;
-    letter-spacing: 0.02em;
-    margin-bottom: 0.35rem;
-    text-transform: lowercase;
-}
-
-.form-select {
-    width: 100%;
-    margin-bottom: 1.5rem;
-    background: #fff;
-    color: #111;
-    border: 1px solid #ddd;
-    padding: 0.35rem 0.5rem;
-    font-family: inherit;
-    font-size: 0.8rem;
-    cursor: pointer;
-}
-.form-select:focus { outline: none; border-color: #111; }
-
-.form-textarea {
-    width: 100%;
-    margin-bottom: 1.5rem;
-    background: #fff;
-    color: #111;
-    border: 1px solid #ddd;
-    padding: 0.5rem;
-    font-family: 'Open Sans', Helvetica, Arial, sans-serif;
-    font-size: 0.85rem;
-    resize: vertical;
-    line-height: 1.5;
-    scrollbar-width: none;
-}
-.form-textarea::-webkit-scrollbar { display: none; }
-.form-textarea:focus { outline: none; border-color: #111; }
-.form-textarea::placeholder { color: #aaa; }
-
-.form-input {
-    width: 100%;
-    margin-bottom: 0.75rem;
-    background: #fff;
-    color: #111;
-    border: 1px solid #ddd;
-    padding: 0.35rem 0.5rem;
-    font-family: inherit;
-    font-size: 0.8rem;
-}
-.form-input:focus { outline: none; border-color: #111; }
-.form-input::placeholder { color: #aaa; }
-
-/* ------------------------------------------------------------------ */
-/* Buttons — synced with style.css                                    */
-/* ------------------------------------------------------------------ */
-.form-actions {
-    display: flex;
-    align-items: center;
-    gap: 1rem;
-}
-
-.btn-dark {
-    padding: 0.5rem 1.5rem;
-    background: #111;
-    color: #fff;
-    border: none;
-    cursor: pointer;
-    font-family: inherit;
-    font-size: 0.85rem;
-}
-.btn-dark:hover { background: #333; }
-
-.text-btn {
-    background: none;
-    border: none;
-    color: #888;
-    cursor: pointer;
-    font-family: inherit;
-    font-size: 0.75rem;
-    padding: 0;
-}
-.text-btn:hover { color: #111; text-decoration: underline; }
+.form-select { margin-bottom: 1.5rem; }
+.form-textarea { margin-bottom: 1.5rem; }
+.form-input { width: 100%; margin-bottom: 0.75rem; }
 
 .save-status {
-    font-size: 0.75rem;
+    font-size: 0.7rem;
     color: #888;
     transition: opacity 0.3s;
 }
@@ -217,7 +85,6 @@ body {
 
 /* ------------------------------------------------------------------ */
 /* Seat suffix sub-section (under backrooms prompts)                   */
-/* Same visual weight as the "add prompt" form above it.               */
 /* ------------------------------------------------------------------ */
 .suffix-section {
     margin-top: 2rem;

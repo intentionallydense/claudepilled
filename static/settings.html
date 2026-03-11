@@ -6,67 +6,89 @@
     <title>settings</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/style.css">
     <link rel="stylesheet" href="/settings.css">
 </head>
 <body>
-    <div id="settings-page">
-        <header class="settings-header">
-            <h1 class="settings-title">settings</h1>
-            <nav class="settings-nav">
-                <a href="/" class="nav-link">chat</a>
-                <a href="/briefing" class="nav-link">briefing</a>
-                <a href="/tasks" class="nav-link">tasks</a>
-                <a href="/" class="nav-link">backrooms</a>
-            </nav>
-        </header>
-        <form id="settings-form" autocomplete="off">
-            <label class="form-label" for="default-model">default model</label>
-            <select id="default-model" class="form-select"></select>
+    <div id="app" class="app-simple">
+        <button id="menu-btn" class="menu-btn">&#9776;</button>
+        <div id="sidebar-backdrop" class="sidebar-backdrop"></div>
 
-            <label class="form-label" for="universal-prompt-select">universal prompt</label>
-            <select id="universal-prompt-select" class="form-select">
-                <option value="">(none)</option>
-            </select>
-
-            <div class="form-actions">
-                <button type="submit" class="btn-dark">save</button>
-                <span id="save-status" class="save-status"></span>
+        <aside id="sidebar">
+            <div class="sidebar-header">
+                <span class="sidebar-title">settings</span>
+                <nav class="sidebar-nav">
+                    <a href="/" class="text-btn">chat</a>
+                    <a href="/briefing" class="text-btn">briefing</a>
+                    <a href="/tasks" class="text-btn">tasks</a>
+                    <a href="/" class="text-btn">backrooms</a>
+                </nav>
             </div>
-        </form>
+        </aside>
 
-        <section class="prompts-section">
-            <h2 class="section-heading">chat prompts</h2>
-            <div id="prompts-list" class="prompts-list"></div>
-            <div class="prompts-add">
-                <input id="new-prompt-name" class="form-input" placeholder="prompt name..." />
-                <textarea id="new-prompt-content" class="form-textarea" rows="3" placeholder="prompt content..."></textarea>
-                <button id="add-prompt-btn" class="btn-dark" type="button">add prompt</button>
-            </div>
-        </section>
+        <main class="page-content">
+            <form id="settings-form" autocomplete="off">
+                <label class="form-label" for="default-model">default model</label>
+                <select id="default-model" class="form-select"></select>
 
-        <section class="prompts-section">
-            <h2 class="section-heading">backrooms prompts</h2>
-            <div id="backrooms-prompts-list" class="prompts-list"></div>
-            <div class="prompts-add">
-                <input id="new-backrooms-prompt-name" class="form-input" placeholder="prompt name..." />
-                <textarea id="new-backrooms-prompt-content" class="form-textarea" rows="3" placeholder="prompt content..."></textarea>
-                <button id="add-backrooms-prompt-btn" class="btn-dark" type="button">add prompt</button>
-            </div>
+                <label class="form-label" for="universal-prompt-select">universal prompt</label>
+                <select id="universal-prompt-select" class="form-select">
+                    <option value="">(none)</option>
+                </select>
 
-            <div class="suffix-section">
-                <h3 class="suffix-heading">seat suffixes</h3>
-                <p class="suffix-hint">appended to each seat's system prompt regardless of which prompt is selected. variables: <code>{self_label}</code>, <code>{other_label}</code>, <code>{seat_number}</code></p>
-                <label class="form-label" for="seat-1-suffix">seat 1 suffix</label>
-                <textarea id="seat-1-suffix" class="form-textarea" rows="3" placeholder="e.g. try to ask more questions than you answer..."></textarea>
-                <label class="form-label" for="seat-2-suffix">seat 2 suffix</label>
-                <textarea id="seat-2-suffix" class="form-textarea" rows="3" placeholder="e.g. additional instructions for seat 2..."></textarea>
                 <div class="form-actions">
-                    <button id="save-suffixes-btn" class="btn-dark" type="button">save suffixes</button>
-                    <span id="suffix-save-status" class="save-status"></span>
+                    <button type="submit" class="btn-dark">save</button>
+                    <span id="save-status" class="save-status"></span>
                 </div>
-            </div>
-        </section>
+            </form>
+
+            <section class="prompts-section">
+                <h2 class="section-heading">chat prompts</h2>
+                <div id="prompts-list" class="prompts-list"></div>
+                <div class="prompts-add">
+                    <input id="new-prompt-name" class="form-input" placeholder="prompt name..." />
+                    <textarea id="new-prompt-content" class="form-textarea" rows="3" placeholder="prompt content..."></textarea>
+                    <button id="add-prompt-btn" class="btn-dark" type="button">add prompt</button>
+                </div>
+            </section>
+
+            <section class="prompts-section">
+                <h2 class="section-heading">backrooms prompts</h2>
+                <div id="backrooms-prompts-list" class="prompts-list"></div>
+                <div class="prompts-add">
+                    <input id="new-backrooms-prompt-name" class="form-input" placeholder="prompt name..." />
+                    <textarea id="new-backrooms-prompt-content" class="form-textarea" rows="3" placeholder="prompt content..."></textarea>
+                    <button id="add-backrooms-prompt-btn" class="btn-dark" type="button">add prompt</button>
+                </div>
+
+                <div class="suffix-section">
+                    <h3 class="suffix-heading">seat suffixes</h3>
+                    <p class="suffix-hint">appended to each seat's system prompt regardless of which prompt is selected. variables: <code>{self_label}</code>, <code>{other_label}</code>, <code>{seat_number}</code></p>
+                    <label class="form-label" for="seat-1-suffix">seat 1 suffix</label>
+                    <textarea id="seat-1-suffix" class="form-textarea" rows="3" placeholder="e.g. try to ask more questions than you answer..."></textarea>
+                    <label class="form-label" for="seat-2-suffix">seat 2 suffix</label>
+                    <textarea id="seat-2-suffix" class="form-textarea" rows="3" placeholder="e.g. additional instructions for seat 2..."></textarea>
+                    <div class="form-actions">
+                        <button id="save-suffixes-btn" class="btn-dark" type="button">save suffixes</button>
+                        <span id="suffix-save-status" class="save-status"></span>
+                    </div>
+                </div>
+            </section>
+        </main>
     </div>
     <script src="/settings.js"></script>
+    <script>
+    // Mobile sidebar toggle (shared pattern with chat/briefing)
+    const menuBtn = document.getElementById("menu-btn");
+    const sidebar = document.getElementById("sidebar");
+    const backdrop = document.getElementById("sidebar-backdrop");
+    function toggleSidebar(open) {
+        const show = open !== undefined ? open : !sidebar.classList.contains("open");
+        sidebar.classList.toggle("open", show);
+        backdrop.classList.toggle("open", show);
+    }
+    if (menuBtn) menuBtn.onclick = () => toggleSidebar();
+    if (backdrop) backdrop.onclick = () => toggleSidebar(false);
+    </script>
 </body>
 </html>

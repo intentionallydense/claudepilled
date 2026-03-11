@@ -1,54 +1,8 @@
 /* ------------------------------------------------------------------ */
-/* Reset & base (matches settings.css / style.css conventions)        */
+/* tasks.css — Task page overrides. Loaded after style.css which      */
+/* provides the sidebar layout, base typography, and shared           */
+/* component styles (buttons, inputs, form labels).                   */
 /* ------------------------------------------------------------------ */
-*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
-body {
-    font-family: "SF Mono", Monaco, Consolas, "Courier New", monospace;
-    font-size: 14px;
-    line-height: 1.6;
-    background: #fff;
-    color: #111;
-    min-height: 100vh;
-}
-
-/* ------------------------------------------------------------------ */
-/* Page layout                                                        */
-/* ------------------------------------------------------------------ */
-#tasks-page {
-    max-width: 640px;
-    padding: 1.5rem;
-}
-
-/* ------------------------------------------------------------------ */
-/* Header                                                             */
-/* ------------------------------------------------------------------ */
-.tasks-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 1.5rem;
-    padding-bottom: 1rem;
-    border-bottom: 1px solid #eee;
-}
-
-.tasks-title {
-    font-size: 1rem;
-    font-weight: 600;
-    color: #111;
-}
-
-.tasks-nav {
-    display: flex;
-    gap: 1rem;
-}
-
-.nav-link {
-    color: #888;
-    text-decoration: none;
-    font-size: 0.75rem;
-}
-.nav-link:hover { color: #111; text-decoration: underline; }
 
 /* ------------------------------------------------------------------ */
 /* Toolbar — filters + brain dump                                     */
@@ -92,16 +46,10 @@ body {
 }
 .filter-select:focus { outline: none; border-color: #111; }
 
-.btn-dark {
+/* Compact toolbar buttons */
+.tasks-toolbar .btn-dark {
     padding: 0.35rem 0.75rem;
-    background: #111;
-    color: #fff;
-    border: none;
-    cursor: pointer;
-    font-family: inherit;
-    font-size: 0.75rem;
 }
-.btn-dark:hover { background: #333; }
 
 /* ------------------------------------------------------------------ */
 /* Task list                                                          */
@@ -223,16 +171,7 @@ body {
     flex-wrap: wrap;
 }
 
-.text-btn {
-    background: none;
-    border: none;
-    color: #888;
-    cursor: pointer;
-    font-family: inherit;
-    font-size: 0.7rem;
-    padding: 0;
-}
-.text-btn:hover { color: #111; text-decoration: underline; }
+/* Danger variant for text buttons (e.g. delete) */
 .text-btn.danger:hover { color: #d44; }
 
 /* ------------------------------------------------------------------ */
@@ -272,54 +211,10 @@ body {
     margin-bottom: 0.5rem;
 }
 
-.form-input {
-    background: #fff;
-    color: #111;
-    border: 1px solid #ddd;
-    padding: 0.35rem 0.5rem;
-    font-family: inherit;
-    font-size: 0.8rem;
-    flex: 1;
-}
-.form-input:focus { outline: none; border-color: #111; }
-.form-input::placeholder { color: #aaa; }
-
-.form-textarea {
-    width: 100%;
-    background: #fff;
-    color: #111;
-    border: 1px solid #ddd;
-    padding: 0.5rem;
-    font-family: 'Open Sans', Helvetica, Arial, sans-serif;
-    font-size: 0.8rem;
-    resize: vertical;
-    line-height: 1.5;
-    margin-bottom: 0.5rem;
-}
-.form-textarea:focus { outline: none; border-color: #111; }
-.form-textarea::placeholder { color: #aaa; }
-
-.form-select {
-    background: #fff;
-    border: 1px solid #ddd;
-    padding: 0.35rem 0.5rem;
-    font-family: inherit;
-    font-size: 0.8rem;
-    color: #666;
-}
-.form-select:focus { outline: none; border-color: #111; }
-
-.form-actions {
-    display: flex;
-    gap: 0.5rem;
-    align-items: center;
-}
-
-.form-label {
-    font-size: 0.65rem;
-    color: #888;
-    text-transform: lowercase;
-}
+/* Task form overrides — tighter spacing than settings-page defaults */
+.task-form .form-input { flex: 1; }
+.task-form .form-textarea { margin-bottom: 0.5rem; }
+.task-form .form-select { width: auto; margin-bottom: 0; color: #666; }
 
 /* ------------------------------------------------------------------ */
 /* Empty state                                                        */
@@ -429,29 +324,6 @@ body {
 .annotate-form input {
     flex: 1;
 }
-
-/* ------------------------------------------------------------------ */
-/* Mobile layout (max-width: 768px)                                    */
-/* ------------------------------------------------------------------ */
-@media (max-width: 768px) {
-    body { font-size: 16px; }
-
-    #tasks-page { padding: 1rem; }
-
-    /* Prevent iOS zoom on input focus */
-    .form-input,
-    .form-textarea,
-    .filter-select,
-    .tag-search-input,
-    .annotate-form input { font-size: 16px; }
-
-    /* Larger touch targets */
-    .filter-btn { padding: 0.4rem 0.65rem; }
-    .btn-dark { padding: 0.5rem 1rem; }
-    .text-btn { font-size: 0.8rem; padding: 0.25rem 0; }
-}
-
-
 
 /* ------------------------------------------------------------------ */
 /* Compact form controls — prevent project/tag from hogging space     */
@@ -638,4 +510,21 @@ body {
 
 .ingestion-archive-btn {
     flex-shrink: 0;
+}
+
+/* ------------------------------------------------------------------ */
+/* Mobile overrides                                                   */
+/* ------------------------------------------------------------------ */
+@media (max-width: 768px) {
+    /* Prevent iOS zoom on input focus */
+    .form-input,
+    .form-textarea,
+    .filter-select,
+    .tag-search-input,
+    .annotate-form input { font-size: 16px; }
+
+    /* Larger touch targets */
+    .filter-btn { padding: 0.4rem 0.65rem; }
+    .tasks-toolbar .btn-dark { padding: 0.5rem 1rem; }
+    .text-btn { font-size: 0.8rem; padding: 0.25rem 0; }
 }
