@@ -1,5 +1,6 @@
 // ---------------------------------------------------------------------------
-// settings.js — Settings page: model defaults, prompt library, seat suffixes.
+// settings.js — Settings page: model defaults, prompt library (chat,
+// backrooms, suffix categories), and seat-suffix assignment dropdowns.
 // Loaded by settings.html after style.css + settings.css.
 // ---------------------------------------------------------------------------
 
@@ -10,8 +11,19 @@ const modelSelect = document.getElementById("default-model");
 const universalPromptSelect = document.getElementById("universal-prompt-select");
 const form = document.getElementById("settings-form");
 const saveStatus = document.getElementById("save-status");
-const promptsList = document.getElementById("prompts-list");
-const backroomsPromptsList = document.getElementById("backrooms-prompts-list");
+
+// Prompt list containers keyed by category
+const listEls = {
+    chat: document.getElementById("prompts-list"),
+    backrooms: document.getElementById("backrooms-prompts-list"),
+    suffix: document.getElementById("suffix-prompts-list"),
+};
+
+// Seat suffix dropdowns
+const suffixSelects = [
+    document.getElementById("seat-1-suffix-select"),
+    document.getElementById("seat-2-suffix-select"),
+];
 
 // ---------------------------------------------------------------------------
 // Load models into select
@@ -24,7 +36,6 @@ async function loadModels() {
     emptyOpt.value = "";
     emptyOpt.textContent = "(none)";
     modelSelect.appendChild(emptyOpt);
-    // Group by provider
     const byProvider = {};
     for (const m of models) {
         const p = m.provider || "anthropic";
@@ -50,7 +61,6 @@ async function loadModels() {
 async function loadUniversalPromptOptions() {
     const res = await fetch("/api/prompts?category=chat");
     const prompts = await res.json();
-    // Keep the "(none)" option, clear the rest
     universalPromptSelect.innerHTML = '<option value="">(none)</option>';
     for (const p of prompts) {
         const opt = document.createElement("option");
@@ -61,17 +71,33 @@ async function loadUniversalPromptOptions() {
 }
 
 // ---------------------------------------------------------------------------
-// Load current settings (includes seat suffixes)
+// Populate seat suffix dropdowns from suffix prompts
+// ---------------------------------------------------------------------------
+function populateSuffixDropdowns(suffixPrompts) {
+    for (const sel of suffixSelects) {
+        const prev = sel.value;
+        sel.innerHTML = '<option value="">(none)</option>';
+        for (const p of suffixPrompts) {
+            const opt = document.createElement("option");
+            opt.value = p.id;
+            opt.textContent = p.name;
+            sel.appendChild(opt);
+        }
+        sel.value = prev;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Load current settings
 // ---------------------------------------------------------------------------
 async function loadSettings() {
     const res = await fetch("/api/settings");
     const settings = await res.json();
     if (settings.default_model) modelSelect.value = settings.default_model;
     if (settings.universal_prompt_id) universalPromptSelect.value = settings.universal_prompt_id;
-    const suffix1 = document.getElementById("seat-1-suffix");
-    const suffix2 = document.getElementById("seat-2-suffix");
-    if (suffix1 && settings.backrooms_seat_1_suffix) suffix1.value = settings.backrooms_seat_1_suffix;
-    if (suffix2 && settings.backrooms_seat_2_suffix) suffix2.value = settings.backrooms_seat_2_suffix;
+    // Seat suffix prompt IDs
+    if (settings.backrooms_seat_1_suffix_id) suffixSelects[0].value = settings.backrooms_seat_1_suffix_id;
+    if (settings.backrooms_seat_2_suffix_id) suffixSelects[1].value = settings.backrooms_seat_2_suffix_id;
 }
 
 // ---------------------------------------------------------------------------
@@ -92,11 +118,38 @@ async function saveSettings(e) {
 }
 
 // ---------------------------------------------------------------------------
+// Save seat suffix assignments
+// ---------------------------------------------------------------------------
+async function saveSuffixes() {
+    const statusEl = document.getElementById("suffix-save-status");
+    await fetch("/api/settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+            backrooms_seat_1_suffix_id: suffixSelects[0].value,
+            backrooms_seat_2_suffix_id: suffixSelects[1].value,
+        }),
+    });
+    if (statusEl) {
+        statusEl.textContent = "saved";
+        setTimeout(() => { statusEl.textContent = ""; }, 2000);
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Collapsible add-prompt forms
 // ---------------------------------------------------------------------------
 function toggleAddForm(category, show) {
-    const formId = category === "backrooms" ? "add-backrooms-prompt-form" : "add-prompt-form";
-    const btnId = category === "backrooms" ? "add-backrooms-prompt-btn" : "add-prompt-btn";
+    const formId = {
+        chat: "add-prompt-form",
+        backrooms: "add-backrooms-prompt-form",
+        suffix: "add-suffix-prompt-form",
+    }[category];
+    const btnId = {
+        chat: "add-prompt-btn",
+        backrooms: "add-backrooms-prompt-btn",
+        suffix: "add-suffix-prompt-btn",
+    }[category];
     const formEl = document.getElementById(formId);
     const btnEl = document.getElementById(btnId);
     if (!formEl || !btnEl) return;
@@ -104,20 +157,18 @@ function toggleAddForm(category, show) {
     if (show) {
         formEl.classList.add("open");
         btnEl.style.display = "none";
-        // Focus the name input
         const nameInput = formEl.querySelector(".form-input");
         if (nameInput) nameInput.focus();
     } else {
         formEl.classList.remove("open");
         btnEl.style.display = "";
-        // Clear inputs
         formEl.querySelectorAll(".form-input").forEach(el => { el.value = ""; });
         formEl.querySelectorAll(".form-textarea").forEach(el => { el.value = ""; });
     }
 }
 
 // ---------------------------------------------------------------------------
-// Prompts library — shared renderer for both chat and backrooms sections
+// Prompts library — shared renderer for all categories
 // ---------------------------------------------------------------------------
 function renderPromptList(listEl, prompts, category) {
     listEl.innerHTML = "";
@@ -169,16 +220,19 @@ function renderPromptList(listEl, prompts, category) {
 }
 
 async function loadAllPrompts() {
-    const [chatPrompts, backroomsPrompts] = await Promise.all([
+    const [chatPrompts, backroomsPrompts, suffixPrompts] = await Promise.all([
         fetch("/api/prompts?category=chat").then(r => r.json()),
         fetch("/api/prompts?category=backrooms").then(r => r.json()),
+        fetch("/api/prompts?category=suffix").then(r => r.json()),
     ]);
-    renderPromptList(promptsList, chatPrompts, "chat");
-    renderPromptList(backroomsPromptsList, backroomsPrompts, "backrooms");
-    // Keep universal prompt dropdown in sync with chat prompts
-    const currentVal = universalPromptSelect.value;
+    renderPromptList(listEls.chat, chatPrompts, "chat");
+    renderPromptList(listEls.backrooms, backroomsPrompts, "backrooms");
+    renderPromptList(listEls.suffix, suffixPrompts, "suffix");
+    // Keep dropdowns in sync
+    const currentUniversal = universalPromptSelect.value;
     await loadUniversalPromptOptions();
-    universalPromptSelect.value = currentVal;
+    universalPromptSelect.value = currentUniversal;
+    populateSuffixDropdowns(suffixPrompts);
 }
 
 function startPromptEdit(listEl, id, prompt, category) {
@@ -227,8 +281,10 @@ function startPromptEdit(listEl, id, prompt, category) {
 }
 
 async function addPrompt(category) {
-    const nameEl = document.getElementById(category === "backrooms" ? "new-backrooms-prompt-name" : "new-prompt-name");
-    const contentEl = document.getElementById(category === "backrooms" ? "new-backrooms-prompt-content" : "new-prompt-content");
+    const nameIds = { chat: "new-prompt-name", backrooms: "new-backrooms-prompt-name", suffix: "new-suffix-prompt-name" };
+    const contentIds = { chat: "new-prompt-content", backrooms: "new-backrooms-prompt-content", suffix: "new-suffix-prompt-content" };
+    const nameEl = document.getElementById(nameIds[category]);
+    const contentEl = document.getElementById(contentIds[category]);
     const name = nameEl.value.trim();
     const content = contentEl.value;
     if (!name) return;
@@ -243,27 +299,6 @@ async function addPrompt(category) {
 }
 
 // ---------------------------------------------------------------------------
-// Seat suffixes — saved via the settings API
-// ---------------------------------------------------------------------------
-async function saveSuffixes() {
-    const suffix1 = document.getElementById("seat-1-suffix")?.value || "";
-    const suffix2 = document.getElementById("seat-2-suffix")?.value || "";
-    const statusEl = document.getElementById("suffix-save-status");
-    await fetch("/api/settings", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-            backrooms_seat_1_suffix: suffix1,
-            backrooms_seat_2_suffix: suffix2,
-        }),
-    });
-    if (statusEl) {
-        statusEl.textContent = "saved";
-        setTimeout(() => { statusEl.textContent = ""; }, 2000);
-    }
-}
-
-// ---------------------------------------------------------------------------
 // Init
 // ---------------------------------------------------------------------------
 form.addEventListener("submit", saveSettings);
@@ -271,6 +306,7 @@ form.addEventListener("submit", saveSettings);
 // Collapsible add-form toggles
 document.getElementById("add-prompt-btn").onclick = () => toggleAddForm("chat", true);
 document.getElementById("add-backrooms-prompt-btn").onclick = () => toggleAddForm("backrooms", true);
+document.getElementById("add-suffix-prompt-btn").onclick = () => toggleAddForm("suffix", true);
 
 // Save/cancel buttons inside the collapsible forms (via data attributes)
 document.querySelectorAll("[data-save]").forEach(btn => {

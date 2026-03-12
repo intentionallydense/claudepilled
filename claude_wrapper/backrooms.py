@@ -289,10 +289,16 @@ class BackroomsOrchestrator:
     def _resolve_suffix(
         self, seat_index: int, participants: list[dict],
     ) -> str:
-        """Resolve per-seat suffix from settings. Returns empty string if unset."""
-        # Settings use 1-indexed seat numbers
-        key = f"backrooms_seat_{seat_index + 1}_suffix"
-        raw = self.db.get_setting(key)
+        """Resolve per-seat suffix from a suffix prompt. Returns empty string if unset."""
+        # Try prompt-ID based lookup first, fall back to legacy raw-text key
+        seat_num = seat_index + 1
+        prompt_id = self.db.get_setting(f"backrooms_seat_{seat_num}_suffix_id")
+        if prompt_id:
+            prompt = self.db.get_prompt(prompt_id)
+            raw = prompt["content"] if prompt else ""
+        else:
+            # Legacy: raw text stored directly in settings
+            raw = self.db.get_setting(f"backrooms_seat_{seat_num}_suffix") or ""
         if not raw:
             return ""
         self_label = participants[seat_index]["label"]

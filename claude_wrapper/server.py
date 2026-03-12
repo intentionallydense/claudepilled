@@ -457,7 +457,7 @@ async def get_settings():
 
 @app.put("/api/settings")
 async def put_settings(body: dict):
-    allowed = {"universal_prompt", "universal_prompt_id", "default_model", "backrooms_seat_1_suffix", "backrooms_seat_2_suffix", "backrooms_seat_3_suffix", "backrooms_seat_4_suffix", "backrooms_seat_5_suffix", "email_ingestion_prompt_id"}
+    allowed = {"universal_prompt", "universal_prompt_id", "default_model", "backrooms_seat_1_suffix", "backrooms_seat_2_suffix", "backrooms_seat_3_suffix", "backrooms_seat_4_suffix", "backrooms_seat_5_suffix", "backrooms_seat_1_suffix_id", "backrooms_seat_2_suffix_id", "backrooms_seat_3_suffix_id", "backrooms_seat_4_suffix_id", "backrooms_seat_5_suffix_id", "email_ingestion_prompt_id"}
     for key, value in body.items():
         if key in allowed:
             manager.db.set_setting(key, value)
