@@ -11,6 +11,10 @@
 /* ------------------------------------------------------------------ */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
+/* Hide scrollbars globally — content still scrolls */
+* { scrollbar-width: none; }
+*::-webkit-scrollbar { display: none; }
+
 body {
     font-family: var(--font-mono);
     font-size: 14px;
@@ -34,7 +38,7 @@ body {
 }
 .app-simple .page-content {
     overflow-y: auto;
-    padding: 2rem 3rem;
+    padding: 1.5rem 3rem;
     max-width: 700px;
 }
 
@@ -271,13 +275,12 @@ body {
     flex: 1;
     min-height: 0;  /* allow flex item to shrink below content size */
     overflow-y: auto;
-    scrollbar-width: none;
     padding: 1.5rem;
     display: flex;
     flex-direction: column;
     align-items: center;
 }
-.messages::-webkit-scrollbar { display: none; }
+
 
 /* ------------------------------------------------------------------ */
 /* Messages                                                           */
@@ -606,10 +609,8 @@ body {
     resize: none;
     max-height: 200px;
     line-height: 1.5;
-    scrollbar-width: none;
     transition: border-color 0.15s;
 }
-#message-input::-webkit-scrollbar { display: none; }
 #message-input:focus { outline: none; border-color: #111; }
 #message-input::placeholder { color: #aaa; }
 
@@ -665,7 +666,7 @@ body {
     overflow: hidden;
 }
 .board-panel-header {
-    padding: 0.6rem 0.75rem 0.4rem;
+    padding: 1rem 1rem 0.5rem;
     flex-shrink: 0;
     display: flex;
     align-items: center;
@@ -816,9 +817,7 @@ body {
     resize: none;
     line-height: 1.5;
     max-height: 200px;
-    scrollbar-width: none;
 }
-#board-input::-webkit-scrollbar { display: none; }
 #board-input:focus { outline: none; border-color: #111; }
 #board-input::placeholder { color: #aaa; }
 .board-input-actions {
@@ -878,11 +877,10 @@ body {
 .node-map {
     flex: 1;
     overflow: scroll;
-    scrollbar-width: none;
     padding: 0.5rem 1rem 1rem;
     position: relative;
 }
-.node-map::-webkit-scrollbar { display: none; }
+
 
 .node-map svg {
     position: absolute;
@@ -1009,10 +1007,8 @@ body {
     font-size: 0.85rem;
     resize: vertical;
     line-height: 1.5;
-    scrollbar-width: none;
     transition: border-color 0.15s;
 }
-.form-textarea::-webkit-scrollbar { display: none; }
 .form-textarea:focus { outline: none; border-color: #111; }
 .form-textarea::placeholder { color: #aaa; }
 
