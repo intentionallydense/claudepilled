@@ -7,8 +7,8 @@
 /* ------------------------------------------------------------------ */
 /* Form component overrides — wider spacing for full-page forms       */
 /* ------------------------------------------------------------------ */
-.form-select { margin-bottom: 1.5rem; }
-.form-textarea { margin-bottom: 1.5rem; }
+.form-select { margin-bottom: 0.75rem; }
+.form-textarea { margin-bottom: 0.75rem; }
 .form-input { width: 100%; margin-bottom: 0.75rem; }
 
 .save-status {
@@ -21,8 +21,8 @@
 /* Prompts library                                                     */
 /* ------------------------------------------------------------------ */
 .prompts-section {
-    margin-top: 3rem;
-    padding-top: 2rem;
+    margin-top: 1.5rem;
+    padding-top: 1rem;
     border-top: 1px solid #eee;
 }
 
@@ -30,7 +30,7 @@
     font-size: 0.85rem;
     font-weight: 600;
     color: #111;
-    margin-bottom: 1.5rem;
+    margin-bottom: 0.75rem;
 }
 
 .prompts-list {
@@ -69,7 +69,7 @@
 .prompt-preview {
     font-size: 0.75rem;
     color: #888;
-    font-family: 'Open Sans', Helvetica, Arial, sans-serif;
+    font-family: var(--font-sans);
     line-height: 1.4;
 }
 
@@ -87,8 +87,8 @@
 /* Seat suffix sub-section (under backrooms prompts)                   */
 /* ------------------------------------------------------------------ */
 .suffix-section {
-    margin-top: 2rem;
-    padding-top: 1.5rem;
+    margin-top: 1.5rem;
+    padding-top: 1rem;
     border-top: 1px solid #eee;
 }
 

@@ -28,7 +28,7 @@
 }
 
 .briefing-text p {
-    font-family: 'Open Sans', Helvetica, Arial, sans-serif;
+    font-family: var(--font-sans);
     font-size: 0.85rem;
     color: #333;
     margin-bottom: 0.75rem;
@@ -40,7 +40,7 @@
 }
 
 .briefing-text li {
-    font-family: 'Open Sans', Helvetica, Arial, sans-serif;
+    font-family: var(--font-sans);
     font-size: 0.85rem;
     color: #333;
     padding: 0.25rem 0;
