@@ -5,6 +5,28 @@
 /* ------------------------------------------------------------------ */
 
 /* ------------------------------------------------------------------ */
+/* Ingestion model health banner                                      */
+/* ------------------------------------------------------------------ */
+.ingestion-banner {
+    font-family: 'Open Sans', Helvetica, Arial, sans-serif;
+    font-size: 0.75rem;
+    padding: 0.5rem 0.75rem;
+    border-radius: 4px;
+    margin-bottom: 1rem;
+    line-height: 1.4;
+}
+.ingestion-banner-fallback {
+    background: #fef3cd;
+    border: 1px solid #e8a838;
+    color: #856404;
+}
+.ingestion-banner-down {
+    background: #f8d7da;
+    border: 1px solid #d44;
+    color: #721c24;
+}
+
+/* ------------------------------------------------------------------ */
 /* Toolbar — filters + brain dump                                     */
 /* ------------------------------------------------------------------ */
 .tasks-toolbar {
@@ -25,24 +47,28 @@
 
 .filter-btn {
     background: none;
-    border: 1px solid #ddd;
+    border: 1px solid #ccc;
+    border-radius: 4px;
     padding: 0.35rem 0.5rem;
-    font-family: inherit;
+    font-family: 'Open Sans', Helvetica, Arial, sans-serif;
     font-size: 0.75rem;
     cursor: pointer;
     color: #666;
+    transition: border-color 0.15s, background 0.15s;
 }
 .filter-btn:hover { border-color: #111; color: #111; }
 .filter-btn.active { background: #111; color: #fff; border-color: #111; }
 
 .filter-select {
     background: #fff;
-    border: 1px solid #ddd;
+    border: 1px solid #ccc;
+    border-radius: 4px;
     padding: 0.35rem 0.5rem;
-    font-family: inherit;
+    font-family: 'Open Sans', Helvetica, Arial, sans-serif;
     font-size: 0.75rem;
     color: #666;
     cursor: pointer;
+    transition: border-color 0.15s;
 }
 .filter-select:focus { outline: none; border-color: #111; }
 
@@ -138,6 +164,7 @@
     margin-top: 0.75rem;
     padding: 0.75rem;
     border: 1px solid #eee;
+    border-radius: 4px;
     font-size: 0.8rem;
 }
 .task-item.expanded .task-detail { display: block; }
@@ -235,11 +262,13 @@
     align-items: center;
     flex-wrap: wrap;
     gap: 0.25rem;
-    border: 1px solid #ddd;
+    border: 1px solid #ccc;
+    border-radius: 4px;
     padding: 0.2rem 0.35rem;
     min-width: 150px;
     flex: 1;
     background: #fff;
+    transition: border-color 0.15s;
 }
 .tag-picker:focus-within { border-color: #111; }
 
@@ -254,6 +283,7 @@
     align-items: center;
     gap: 0.2rem;
     background: #f0f0f0;
+    border-radius: 3px;
     padding: 0.1rem 0.35rem;
     font-size: 0.7rem;
     color: #444;
@@ -286,8 +316,9 @@
     left: -1px;
     right: -1px;
     background: #fff;
-    border: 1px solid #ddd;
+    border: 1px solid #ccc;
     border-top: none;
+    border-radius: 0 0 4px 4px;
     max-height: 140px;
     overflow-y: auto;
     z-index: 10;
@@ -390,10 +421,12 @@
 }
 .weekday-toggle span {
     padding: 0.25rem 0.45rem;
-    border: 1px solid #ddd;
+    border: 1px solid #ccc;
+    border-radius: 3px;
     font-family: inherit;
     font-size: 0.7rem;
     user-select: none;
+    transition: background 0.15s, border-color 0.15s;
 }
 .weekday-toggle input:checked + span {
     background: #111;
@@ -426,8 +459,9 @@
     right: 0;
     min-width: 100%;
     background: #fff;
-    border: 1px solid #ddd;
+    border: 1px solid #ccc;
     border-top: none;
+    border-radius: 0 0 4px 4px;
     max-height: 140px;
     overflow-y: auto;
     z-index: 10;
@@ -502,11 +536,14 @@
     font-size: 0.6rem;
     padding: 0.05rem 0.3rem;
     border: 1px solid #ddd;
+    border-radius: 3px;
     color: #666;
 }
 .ingestion-badge.badge-task { border-color: #e8a838; color: #e8a838; }
 .ingestion-badge.badge-pin { border-color: #888; color: #888; }
 .ingestion-badge.badge-none { border-color: #ddd; color: #aaa; }
+.ingestion-badge.badge-info { border-color: #6b9fd4; color: #6b9fd4; }
+.ingestion-badge.badge-trash { border-color: #ccc; color: #bbb; }
 
 .ingestion-archive-btn {
     flex-shrink: 0;

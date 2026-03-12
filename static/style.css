@@ -74,6 +74,7 @@ body {
     width: calc(100% - 2rem);
     background: none;
     border: 1px dashed #ccc;
+    border-radius: 4px;
     cursor: pointer;
     font-family: inherit;
     font-size: 0.75rem;
@@ -85,12 +86,14 @@ body {
 }
 .sidebar-search {
     width: 100%;
-    border: 1px solid #ddd;
+    border: 1px solid #ccc;
+    border-radius: 4px;
     padding: 0.25rem 0.4rem;
     font-family: inherit;
     font-size: 0.7rem;
     color: #111;
     background: #fff;
+    transition: border-color 0.15s;
 }
 .sidebar-search:focus { outline: none; border-color: #111; }
 .sidebar-search::placeholder { color: #aaa; }
@@ -204,14 +207,16 @@ body {
 .select-minimal {
     background: #fff;
     color: #111;
-    border: 1px solid #ddd;
+    border: 1px solid #ccc;
+    border-radius: 4px;
     padding: 0.35rem 0.5rem;
-    font-family: inherit;
+    font-family: 'Open Sans', Helvetica, Arial, sans-serif;
     font-size: 0.8rem;
     cursor: pointer;
     min-width: 0;
     max-width: 200px;
     text-overflow: ellipsis;
+    transition: border-color 0.15s;
 }
 .select-minimal:focus { outline: none; border-color: #111; }
 
@@ -335,7 +340,8 @@ body {
     width: 100%;
     background: #fff;
     color: #111;
-    border: 1px solid #ddd;
+    border: 1px solid #ccc;
+    border-radius: 4px;
     padding: 0.5rem;
     font-family: 'Open Sans', Helvetica, Arial, sans-serif;
     font-size: 0.85rem;
@@ -343,6 +349,7 @@ body {
     line-height: 1.5;
     min-height: 60px;
     overflow: hidden;
+    transition: border-color 0.15s;
 }
 .edit-textarea:focus { outline: none; border-color: #111; }
 .edit-actions {
@@ -352,12 +359,14 @@ body {
 }
 .edit-actions button {
     background: none;
-    border: 1px solid #ddd;
+    border: 1px solid #ccc;
+    border-radius: 4px;
     padding: 0.25rem 0.5rem;
-    font-family: inherit;
+    font-family: 'Open Sans', Helvetica, Arial, sans-serif;
     font-size: 0.75rem;
     cursor: pointer;
     color: #111;
+    transition: border-color 0.15s;
 }
 .edit-actions button:hover { border-color: #111; }
 .edit-actions .edit-send {
@@ -380,6 +389,7 @@ body {
 /* ------------------------------------------------------------------ */
 .thinking-block {
     border: 1px solid #eee;
+    border-radius: 4px;
     margin: 0.5rem 0;
     overflow: hidden;
 }
@@ -588,7 +598,8 @@ body {
     width: 100%;
     background: #fff;
     color: #111;
-    border: 1px solid #ddd;
+    border: 1px solid #ccc;
+    border-radius: 4px;
     padding: 0.5rem;
     font-family: 'Open Sans', Helvetica, Arial, sans-serif;
     font-size: 0.85rem;
@@ -596,6 +607,7 @@ body {
     max-height: 200px;
     line-height: 1.5;
     scrollbar-width: none;
+    transition: border-color 0.15s;
 }
 #message-input::-webkit-scrollbar { display: none; }
 #message-input:focus { outline: none; border-color: #111; }
@@ -619,11 +631,13 @@ body {
     background: #111;
     color: #fff;
     border: 1px solid #111;
+    border-radius: 4px;
     padding: 0.35rem 1rem;
-    font-family: inherit;
+    font-family: 'Open Sans', Helvetica, Arial, sans-serif;
     font-size: 0.8rem;
     cursor: pointer;
     flex-shrink: 0;
+    transition: background 0.15s;
 }
 .send-btn:hover { background: #333; border-color: #333; }
 .send-btn:disabled { background: #ccc; border-color: #ccc; cursor: not-allowed; }
@@ -632,11 +646,13 @@ body {
     background: #fff;
     color: #c00;
     border: 1px solid #c00;
+    border-radius: 4px;
     padding: 0.35rem 1rem;
-    font-family: inherit;
+    font-family: 'Open Sans', Helvetica, Arial, sans-serif;
     font-size: 0.8rem;
     cursor: pointer;
     flex-shrink: 0;
+    transition: background 0.15s;
 }
 .stop-btn:hover { background: #fef2f2; }
 
@@ -795,7 +811,8 @@ body {
     width: 100%;
     background: #fff;
     color: #111;
-    border: 1px solid #ddd;
+    border: 1px solid #ccc;
+    border-radius: 4px;
     padding: 0.5rem;
     font-family: 'Open Sans', Helvetica, Arial, sans-serif;
     font-size: 0.85rem;
@@ -816,10 +833,12 @@ body {
     background: #111;
     color: #fff;
     border: 1px solid #111;
+    border-radius: 4px;
     padding: 0.35rem 1rem;
-    font-family: inherit;
+    font-family: 'Open Sans', Helvetica, Arial, sans-serif;
     font-size: 0.8rem;
     cursor: pointer;
+    transition: background 0.15s;
 }
 .board-input-btn:hover { background: #333; }
 
@@ -850,19 +869,20 @@ body {
 
 .tree-search {
     width: 100%;
-    border: 1px solid #ddd;
+    border: 1px solid #ccc;
+    border-radius: 4px;
     padding: 0.25rem 0.4rem;
     font-family: inherit;
     font-size: 0.7rem;
     color: #111;
+    transition: border-color 0.15s;
 }
 .tree-search:focus { outline: none; border-color: #111; }
 .tree-search::placeholder { color: #aaa; }
 
 .node-map {
     flex: 1;
-    overflow-y: scroll;
-    overflow-x: hidden;
+    overflow: scroll;
     scrollbar-width: none;
     padding: 0.5rem 1rem 1rem;
     position: relative;
@@ -936,7 +956,8 @@ body {
 }
 .modal-content {
     background: #fff;
-    border: 1px solid #eee;
+    border: 1px solid #ddd;
+    border-radius: 6px;
     width: 400px;
     max-height: 70vh;
     overflow-y: auto;
@@ -960,26 +981,29 @@ body {
     cursor: pointer;
 }
 .modal-close:hover { color: #111; }
-.modal-body { padding: 1rem; }
+.modal-body { padding: 1.25rem; }
 
 .form-label {
     display: block;
-    font-size: 0.7rem;
-    color: #888;
+    font-size: 0.75rem;
+    color: #777;
     letter-spacing: 0.02em;
-    margin-bottom: 0.35rem;
+    margin-bottom: 0.4rem;
     text-transform: lowercase;
+    font-family: 'Open Sans', Helvetica, Arial, sans-serif;
 }
 .form-select {
     width: 100%;
     margin-bottom: 1rem;
     background: #fff;
     color: #111;
-    border: 1px solid #ddd;
-    padding: 0.35rem 0.5rem;
-    font-family: inherit;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    padding: 0.4rem 0.5rem;
+    font-family: 'Open Sans', Helvetica, Arial, sans-serif;
     font-size: 0.8rem;
     cursor: pointer;
+    transition: border-color 0.15s;
 }
 .form-select:focus { outline: none; border-color: #111; }
 .form-textarea {
@@ -987,13 +1011,15 @@ body {
     margin-bottom: 1rem;
     background: #fff;
     color: #111;
-    border: 1px solid #ddd;
+    border: 1px solid #ccc;
+    border-radius: 4px;
     padding: 0.5rem;
     font-family: 'Open Sans', Helvetica, Arial, sans-serif;
     font-size: 0.85rem;
     resize: vertical;
     line-height: 1.5;
     scrollbar-width: none;
+    transition: border-color 0.15s;
 }
 .form-textarea::-webkit-scrollbar { display: none; }
 .form-textarea:focus { outline: none; border-color: #111; }
@@ -1002,10 +1028,12 @@ body {
 .form-input {
     background: #fff;
     color: #111;
-    border: 1px solid #ddd;
-    padding: 0.35rem 0.5rem;
-    font-family: inherit;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    padding: 0.4rem 0.5rem;
+    font-family: 'Open Sans', Helvetica, Arial, sans-serif;
     font-size: 0.8rem;
+    transition: border-color 0.15s;
 }
 .form-input:focus { outline: none; border-color: #111; }
 .form-input::placeholder { color: #aaa; }
@@ -1014,6 +1042,7 @@ body {
     display: flex;
     align-items: center;
     gap: 0.75rem;
+    margin-top: 0.25rem;
 }
 
 .btn-dark {
@@ -1021,9 +1050,11 @@ body {
     background: #111;
     color: #fff;
     border: none;
+    border-radius: 4px;
     cursor: pointer;
-    font-family: inherit;
+    font-family: 'Open Sans', Helvetica, Arial, sans-serif;
     font-size: 0.8rem;
+    transition: background 0.15s;
 }
 .btn-dark:hover { background: #333; }
 .modal-body .btn-dark { width: 100%; padding: 0.5rem; }
@@ -1076,6 +1107,7 @@ body {
     gap: 0.25rem;
     background: #fff;
     border: 1px solid #ddd;
+    border-radius: 3px;
     padding: 0.15rem 0.4rem;
     font-size: 0.7rem;
     color: #333;
@@ -1106,8 +1138,9 @@ body {
     left: 0;
     right: 0;
     background: #fff;
-    border: 1px solid #ddd;
+    border: 1px solid #ccc;
     border-top: none;
+    border-radius: 0 0 4px 4px;
     max-height: 160px;
     overflow-y: auto;
     z-index: 50;
@@ -1132,7 +1165,8 @@ body {
 /* File modal                                                          */
 /* ------------------------------------------------------------------ */
 .file-upload-area {
-    border: 2px dashed #ddd;
+    border: 2px dashed #ccc;
+    border-radius: 6px;
     padding: 1rem;
     text-align: center;
     margin-bottom: 1rem;
@@ -1150,12 +1184,14 @@ body {
 }
 .file-tags-input {
     width: 100%;
-    border: 1px solid #ddd;
+    border: 1px solid #ccc;
+    border-radius: 4px;
     padding: 0.35rem 0.5rem;
     font-family: inherit;
     font-size: 0.8rem;
     color: #111;
     text-align: center;
+    transition: border-color 0.15s;
 }
 .file-tags-input:focus { outline: none; border-color: #111; }
 .file-tags-input::placeholder { color: #aaa; }
@@ -1200,6 +1236,7 @@ body {
 .tag-chip {
     background: #f5f5f5;
     border: 1px solid #eee;
+    border-radius: 3px;
     padding: 0.1rem 0.35rem;
     font-size: 0.65rem;
     color: #666;
@@ -1227,12 +1264,14 @@ body {
     align-items: center;
 }
 .retag-form input {
-    border: 1px solid #ddd;
+    border: 1px solid #ccc;
+    border-radius: 4px;
     padding: 0.2rem 0.35rem;
     font-family: inherit;
     font-size: 0.7rem;
     color: #111;
     width: 120px;
+    transition: border-color 0.15s;
 }
 .retag-form input:focus { outline: none; border-color: #111; }
 .retag-form button {
@@ -1340,6 +1379,7 @@ body {
     padding: 0.5rem;
     background: #f8f8f8;
     border: 1px solid #eee;
+    border-radius: 4px;
     white-space: pre-wrap;
     font-family: 'Open Sans', Helvetica, Arial, sans-serif;
     line-height: 1.5;
@@ -1360,7 +1400,8 @@ body {
     left: 0.75rem;
     z-index: 201;
     background: #fff;
-    border: 1px solid #ddd;
+    border: 1px solid #ccc;
+    border-radius: 4px;
     font-size: 1.25rem;
     padding: 0.25rem 0.5rem;
     cursor: pointer;
@@ -1440,18 +1481,18 @@ body {
     display: flex;
     gap: 0.75rem;
     align-items: center;
-    margin-top: 0.25rem;
+    margin-top: 0.5rem;
 }
 .prompt-actions .btn-dark {
     width: auto;
-    padding: 0.5rem 1.5rem;
+    padding: 0.4rem 1.25rem;
 }
 .prompt-hint {
     font-size: 0.7rem;
     color: #aaa;
-    margin-top: -0.5rem;
     margin-bottom: 1rem;
     line-height: 1.4;
+    font-family: 'Open Sans', Helvetica, Arial, sans-serif;
 }
 .save-status {
     font-size: 0.7rem;
@@ -1516,12 +1557,14 @@ body {
 }
 .speed-btn {
     background: none;
-    border: 1px solid #ddd;
+    border: 1px solid #ccc;
+    border-radius: 3px;
     color: #888;
     cursor: pointer;
     font-family: inherit;
     font-size: 0.6rem;
     padding: 0.1rem 0.3rem;
+    transition: border-color 0.15s, background 0.15s;
 }
 .speed-btn:hover { border-color: #111; color: #111; }
 .speed-btn.active { background: #111; color: #fff; border-color: #111; }
@@ -1540,11 +1583,13 @@ body {
 .iteration-select, .next-speaker-select {
     font-family: inherit;
     font-size: 0.6rem;
-    border: 1px solid #ddd;
+    border: 1px solid #ccc;
+    border-radius: 3px;
     color: #555;
     background: none;
     padding: 0.1rem 0.2rem;
     cursor: pointer;
+    transition: border-color 0.15s;
 }
 .iteration-select:hover, .next-speaker-select:hover {
     border-color: #111;
