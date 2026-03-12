@@ -299,12 +299,16 @@ class TaskDatabase:
         new_due = _next_recurrence_date(rule, due)
         if new_due is None:
             return
+        # tags may already be a list (from _deserialize) or a JSON string
+        tags = completed_task["tags"]
+        if isinstance(tags, str):
+            tags = json.loads(tags)
         self.create(
             title=completed_task["title"],
             description=completed_task["description"],
             priority=completed_task["priority"],
             project=completed_task["project"],
-            tags=json.loads(completed_task["tags"]),
+            tags=tags,
             due=new_due.isoformat(),
             recurrence=completed_task["recurrence"],
         )
