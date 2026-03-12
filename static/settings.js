@@ -1,4 +1,9 @@
 // ---------------------------------------------------------------------------
+// settings.js — Settings page: model defaults, prompt library, seat suffixes.
+// Loaded by settings.html after style.css + settings.css.
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
 // DOM elements
 // ---------------------------------------------------------------------------
 const modelSelect = document.getElementById("default-model");
@@ -84,6 +89,31 @@ async function saveSettings(e) {
     });
     saveStatus.textContent = "saved";
     setTimeout(() => { saveStatus.textContent = ""; }, 2000);
+}
+
+// ---------------------------------------------------------------------------
+// Collapsible add-prompt forms
+// ---------------------------------------------------------------------------
+function toggleAddForm(category, show) {
+    const formId = category === "backrooms" ? "add-backrooms-prompt-form" : "add-prompt-form";
+    const btnId = category === "backrooms" ? "add-backrooms-prompt-btn" : "add-prompt-btn";
+    const formEl = document.getElementById(formId);
+    const btnEl = document.getElementById(btnId);
+    if (!formEl || !btnEl) return;
+
+    if (show) {
+        formEl.classList.add("open");
+        btnEl.style.display = "none";
+        // Focus the name input
+        const nameInput = formEl.querySelector(".form-input");
+        if (nameInput) nameInput.focus();
+    } else {
+        formEl.classList.remove("open");
+        btnEl.style.display = "";
+        // Clear inputs
+        formEl.querySelectorAll(".form-input").forEach(el => { el.value = ""; });
+        formEl.querySelectorAll(".form-textarea").forEach(el => { el.value = ""; });
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -208,8 +238,7 @@ async function addPrompt(category) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name, content, category }),
     });
-    nameEl.value = "";
-    contentEl.value = "";
+    toggleAddForm(category, false);
     loadAllPrompts();
 }
 
@@ -238,7 +267,18 @@ async function saveSuffixes() {
 // Init
 // ---------------------------------------------------------------------------
 form.addEventListener("submit", saveSettings);
-document.getElementById("add-prompt-btn").onclick = () => addPrompt("chat");
-document.getElementById("add-backrooms-prompt-btn").onclick = () => addPrompt("backrooms");
+
+// Collapsible add-form toggles
+document.getElementById("add-prompt-btn").onclick = () => toggleAddForm("chat", true);
+document.getElementById("add-backrooms-prompt-btn").onclick = () => toggleAddForm("backrooms", true);
+
+// Save/cancel buttons inside the collapsible forms (via data attributes)
+document.querySelectorAll("[data-save]").forEach(btn => {
+    btn.onclick = () => addPrompt(btn.dataset.save);
+});
+document.querySelectorAll("[data-cancel]").forEach(btn => {
+    btn.onclick = () => toggleAddForm(btn.dataset.cancel, false);
+});
+
 document.getElementById("save-suffixes-btn").onclick = saveSuffixes;
 Promise.all([loadModels(), loadUniversalPromptOptions(), loadAllPrompts()]).then(loadSettings);

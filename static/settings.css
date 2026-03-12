@@ -34,7 +34,7 @@
 }
 
 .prompts-list {
-    margin-bottom: 1.5rem;
+    margin-bottom: 0.5rem;
 }
 
 .prompts-empty {
@@ -74,7 +74,7 @@
 }
 
 .prompts-add {
-    padding-top: 1rem;
+    padding-top: 0.5rem;
 }
 
 .prompt-edit-actions {
@@ -84,25 +84,25 @@
 }
 
 /* ------------------------------------------------------------------ */
-/* Seat suffix sub-section (under backrooms prompts)                   */
+/* Collapsible add-prompt form — hidden until "+ add" is clicked       */
 /* ------------------------------------------------------------------ */
-.suffix-section {
-    margin-top: 1.5rem;
-    padding-top: 1rem;
-    border-top: 1px solid #eee;
+.prompts-add-form {
+    display: none;
+    margin-top: 0.5rem;
+}
+.prompts-add-form.open {
+    display: block;
 }
 
-.suffix-heading {
-    font-size: 0.8rem;
-    font-weight: 600;
-    color: #111;
-    margin-bottom: 0.5rem;
-}
-
+/* ------------------------------------------------------------------ */
+/* Seat suffix hint — sans-serif for readability                       */
+/* ------------------------------------------------------------------ */
 .suffix-hint {
+    font-family: var(--font-sans);
     font-size: 0.7rem;
     color: #888;
-    margin-bottom: 1.25rem;
+    margin-top: 1.5rem;
+    margin-bottom: 0.75rem;
     line-height: 1.5;
 }
 

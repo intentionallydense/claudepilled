@@ -46,9 +46,15 @@
                 <h2 class="section-heading">chat prompts</h2>
                 <div id="prompts-list" class="prompts-list"></div>
                 <div class="prompts-add">
-                    <input id="new-prompt-name" class="form-input" placeholder="prompt name..." />
-                    <textarea id="new-prompt-content" class="form-textarea" rows="3" placeholder="prompt content..."></textarea>
-                    <button id="add-prompt-btn" class="btn-dark" type="button">add prompt</button>
+                    <button id="add-prompt-btn" class="text-btn" type="button">+ add</button>
+                    <div id="add-prompt-form" class="prompts-add-form">
+                        <input id="new-prompt-name" class="form-input" placeholder="prompt name..." />
+                        <textarea id="new-prompt-content" class="form-textarea" rows="3" placeholder="prompt content..."></textarea>
+                        <div class="prompt-edit-actions">
+                            <button class="text-btn" type="button" data-cancel="chat">cancel</button>
+                            <button class="btn-dark" type="button" data-save="chat">save</button>
+                        </div>
+                    </div>
                 </div>
             </section>
 
@@ -56,22 +62,25 @@
                 <h2 class="section-heading">backrooms prompts</h2>
                 <div id="backrooms-prompts-list" class="prompts-list"></div>
                 <div class="prompts-add">
-                    <input id="new-backrooms-prompt-name" class="form-input" placeholder="prompt name..." />
-                    <textarea id="new-backrooms-prompt-content" class="form-textarea" rows="3" placeholder="prompt content..."></textarea>
-                    <button id="add-backrooms-prompt-btn" class="btn-dark" type="button">add prompt</button>
+                    <button id="add-backrooms-prompt-btn" class="text-btn" type="button">+ add</button>
+                    <div id="add-backrooms-prompt-form" class="prompts-add-form">
+                        <input id="new-backrooms-prompt-name" class="form-input" placeholder="prompt name..." />
+                        <textarea id="new-backrooms-prompt-content" class="form-textarea" rows="3" placeholder="prompt content..."></textarea>
+                        <div class="prompt-edit-actions">
+                            <button class="text-btn" type="button" data-cancel="backrooms">cancel</button>
+                            <button class="btn-dark" type="button" data-save="backrooms">save</button>
+                        </div>
+                    </div>
                 </div>
 
-                <div class="suffix-section">
-                    <h3 class="suffix-heading">seat suffixes</h3>
-                    <p class="suffix-hint">appended to each seat's system prompt regardless of which prompt is selected. variables: <code>{self_label}</code>, <code>{other_label}</code>, <code>{seat_number}</code></p>
-                    <label class="form-label" for="seat-1-suffix">seat 1 suffix</label>
-                    <textarea id="seat-1-suffix" class="form-textarea" rows="3" placeholder="e.g. try to ask more questions than you answer..."></textarea>
-                    <label class="form-label" for="seat-2-suffix">seat 2 suffix</label>
-                    <textarea id="seat-2-suffix" class="form-textarea" rows="3" placeholder="e.g. additional instructions for seat 2..."></textarea>
-                    <div class="form-actions">
-                        <button id="save-suffixes-btn" class="btn-dark" type="button">save suffixes</button>
-                        <span id="suffix-save-status" class="save-status"></span>
-                    </div>
+                <p class="suffix-hint">seat suffixes are appended to each seat's system prompt. variables: <code>{self_label}</code>, <code>{other_label}</code>, <code>{seat_number}</code></p>
+                <label class="form-label" for="seat-1-suffix">seat 1 suffix</label>
+                <textarea id="seat-1-suffix" class="form-textarea" rows="3" placeholder="e.g. try to ask more questions than you answer..."></textarea>
+                <label class="form-label" for="seat-2-suffix">seat 2 suffix</label>
+                <textarea id="seat-2-suffix" class="form-textarea" rows="3" placeholder="e.g. additional instructions for seat 2..."></textarea>
+                <div class="form-actions">
+                    <button id="save-suffixes-btn" class="btn-dark" type="button">save</button>
+                    <span id="suffix-save-status" class="save-status"></span>
                 </div>
             </section>
         </main>
