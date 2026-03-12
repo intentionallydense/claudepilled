@@ -172,7 +172,11 @@ class ConversationManager:
         client, tool_defs, is_anthropic, has_web_search = self._get_client_and_tools(conv.model)
         compactions = self._get_compactions(conversation_id)
         api_messages = self._to_api_messages(conv.messages, compactions)
-        effective_system = self._get_effective_system_prompt(conv)
+        if is_anthropic:
+            effective_system = self._build_cached_system_blocks(conv)
+            api_messages = self._add_message_cache_breakpoints(api_messages)
+        else:
+            effective_system = self._get_effective_system_prompt(conv)
 
         for _ in range(10):
             assistant_msg = client.send(
@@ -187,6 +191,8 @@ class ConversationManager:
             conv.messages.append(assistant_msg)
             self.db.save_message(conversation_id, assistant_msg)
             api_messages = self._to_api_messages(conv.messages, compactions)
+            if is_anthropic:
+                api_messages = self._add_message_cache_breakpoints(api_messages)
 
             tool_blocks = assistant_msg.tool_use_blocks()
             if not tool_blocks:
@@ -197,6 +203,8 @@ class ConversationManager:
             conv.messages.append(tool_msg)
             self.db.save_message(conversation_id, tool_msg)
             api_messages = self._to_api_messages(conv.messages, compactions)
+            if is_anthropic:
+                api_messages = self._add_message_cache_breakpoints(api_messages)
 
         return conv.messages[-1].text()
 
@@ -211,7 +219,7 @@ class ConversationManager:
         api_messages: list[dict],
         tool_defs,
         model_api_id: str,
-        system: str,
+        system: str | list[dict],
         thinking_budget: int | None = None,
         web_search: bool = False,
         state: _TurnState,
@@ -349,10 +357,15 @@ class ConversationManager:
 
         client, tool_defs, is_anthropic, has_web_search = self._get_client_and_tools(conv.model)
         compactions = self._get_compactions(conversation_id)
-        effective_system = self._get_effective_system_prompt(conv)
+        if is_anthropic:
+            effective_system = self._build_cached_system_blocks(conv)
+        else:
+            effective_system = self._get_effective_system_prompt(conv)
 
         for _ in range(10):
             api_messages = self._to_api_messages(conv.messages, compactions)
+            if is_anthropic:
+                api_messages = self._add_message_cache_breakpoints(api_messages)
             state = _TurnState()
             async for event in self._collect_stream_events(
                 client=client, api_messages=api_messages, tool_defs=tool_defs,
@@ -433,9 +446,12 @@ class ConversationManager:
         self.db.update_conversation_model(conversation_id, model)
         conv.model = model
 
-        effective_system = self._get_effective_system_prompt(conv)
-        api_messages = [{"role": "user", "content": prompt_text}]
         client, tool_defs, is_anthropic, has_web_search = self._get_client_and_tools(model)
+        if is_anthropic:
+            effective_system = self._build_cached_system_blocks(conv)
+        else:
+            effective_system = self._get_effective_system_prompt(conv)
+        api_messages = [{"role": "user", "content": prompt_text}]
 
         state = _TurnState()
         async for event in self._collect_stream_events(
@@ -486,10 +502,15 @@ class ConversationManager:
 
         client, tool_defs, is_anthropic, has_web_search = self._get_client_and_tools(conv.model)
         compactions = self._get_compactions(conversation_id)
-        effective_system = self._get_effective_system_prompt(conv)
+        if is_anthropic:
+            effective_system = self._build_cached_system_blocks(conv)
+        else:
+            effective_system = self._get_effective_system_prompt(conv)
 
         for _ in range(10):
             api_messages = self._to_api_messages(conv.messages, compactions)
+            if is_anthropic:
+                api_messages = self._add_message_cache_breakpoints(api_messages)
             state = _TurnState()
             async for event in self._collect_stream_events(
                 client=client, api_messages=api_messages, tool_defs=tool_defs,
@@ -690,15 +711,19 @@ class ConversationManager:
     # Prompt composition
     # ------------------------------------------------------------------
 
-    def _get_effective_system_prompt(self, conv: Conversation) -> str:
-        """Build the system prompt from universal prompt + saved prompt (if selected).
+    def _get_system_prompt_parts(self, conv: Conversation) -> list[str]:
+        """Return system prompt as separate layers for cache-aware callers.
 
-        The universal prompt can be set two ways:
-        - universal_prompt_id: references a saved chat prompt (preferred)
-        - universal_prompt: legacy raw text fallback
-        Falls back to conv.system_prompt for legacy conversations that have
-        a baked-in prompt but no prompt_id.
+        Returns up to 2 strings:
+        [0] Stable layer: universal prompt + conversation prompt + legacy system_prompt
+        [1] Dynamic layer: injected files/pins (changes when user adds/removes #tags)
+
+        Callers that support multi-block system prompts (Anthropic) can cache
+        each layer independently so that changing #tags doesn't invalidate
+        the stable prefix cache. Others join with "\\n\\n".
         """
+        # Stable layer — rarely changes within a conversation
+        stable_parts: list[str] = []
         universal = ""
         universal_id = self.db.get_setting("universal_prompt_id")
         if universal_id:
@@ -707,18 +732,43 @@ class ConversationManager:
                 universal = prompt["content"]
         if not universal:
             universal = self.db.get_setting("universal_prompt") or ""
-        parts = [universal] if universal else []
+        if universal:
+            stable_parts.append(universal)
         if conv.prompt_id:
             prompt = self.db.get_prompt(conv.prompt_id)
             if prompt:
-                parts.append(prompt["content"])
+                stable_parts.append(prompt["content"])
         if conv.system_prompt:
-            parts.append(conv.system_prompt)
-        # Append injected files if any are active for this conversation
+            stable_parts.append(conv.system_prompt)
+
+        layers: list[str] = []
+        if stable_parts:
+            layers.append("\n\n".join(stable_parts))
+
+        # Dynamic layer — injected files/pins
         files_block = self._build_injected_files_block(conv.id)
         if files_block:
-            parts.append(files_block)
-        return "\n\n".join(parts)
+            layers.append(files_block)
+
+        return layers
+
+    def _get_effective_system_prompt(self, conv: Conversation) -> str:
+        """Build the full system prompt as a single string (for non-Anthropic providers)."""
+        return "\n\n".join(self._get_system_prompt_parts(conv))
+
+    def _build_cached_system_blocks(self, conv: Conversation) -> list[dict]:
+        """Build structured system prompt blocks with cache_control for Anthropic.
+
+        Each layer gets its own cache breakpoint so that changing injected
+        files/pins doesn't invalidate the stable prompt prefix cache.
+        """
+        parts = self._get_system_prompt_parts(conv)
+        if not parts:
+            return []
+        return [
+            {"type": "text", "text": text, "cache_control": {"type": "ephemeral"}}
+            for text in parts
+        ]
 
     def _build_injected_files_block(self, conversation_id: str) -> str:
         """Build XML block of injected files and tagged pins for the system prompt."""
@@ -835,5 +885,44 @@ class ConversationManager:
         # Append remaining messages after the cutoff
         remaining = messages[cutoff_index + 1:]
         api_messages.extend(m.to_api_format() for m in remaining)
+
+        return api_messages
+
+    @staticmethod
+    def _add_message_cache_breakpoints(
+        api_messages: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Add a cache_control breakpoint to the second-to-last user turn.
+
+        This caches the conversation prefix so that only the most recent
+        exchange is sent uncached on each new turn. The Anthropic API caches
+        everything from the start of the request up to the breakpoint.
+
+        Only useful for Anthropic — callers should skip for other providers.
+        """
+        if len(api_messages) < 4:
+            return api_messages
+
+        # Find the second-to-last user message
+        user_indices = [i for i, m in enumerate(api_messages) if m["role"] == "user"]
+        if len(user_indices) < 2:
+            return api_messages
+
+        target_idx = user_indices[-2]
+        msg = api_messages[target_idx]
+        content = msg["content"]
+
+        if isinstance(content, str):
+            api_messages[target_idx] = {
+                "role": msg["role"],
+                "content": [
+                    {"type": "text", "text": content, "cache_control": {"type": "ephemeral"}}
+                ],
+            }
+        elif isinstance(content, list) and content:
+            # Add cache_control to the last content block
+            last_block = dict(content[-1])
+            last_block["cache_control"] = {"type": "ephemeral"}
+            content[-1] = last_block
 
         return api_messages

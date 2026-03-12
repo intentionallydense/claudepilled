@@ -60,7 +60,7 @@ class OpenAICompatibleClient:
         tools: list[Any] | None = None,
         model: str | None = None,
         max_tokens: int | None = None,
-        system: str | None = None,
+        system: str | list[dict] | None = None,
         thinking_budget: int | None = None,
         web_search: bool = False,
         max_retries: int = 3,
@@ -271,7 +271,7 @@ class OpenAICompatibleClient:
         tools: list[Any] | None = None,
         model: str | None = None,
         max_tokens: int | None = None,
-        system: str | None = None,
+        system: str | list[dict] | None = None,
         thinking_budget: int | None = None,
         web_search: bool = False,
     ) -> Message:
@@ -347,7 +347,7 @@ class OpenAICompatibleClient:
     def _build_messages(
         self,
         messages: list[dict[str, Any]],
-        system: str | None,
+        system: str | list[dict] | None,
     ) -> list[dict[str, Any]]:
         """Prepend system message and normalize message format.
 
@@ -357,7 +357,13 @@ class OpenAICompatibleClient:
         """
         api_messages = []
         if system:
-            api_messages.append({"role": "system", "content": system})
+            # Flatten structured blocks (Anthropic format) to plain text
+            if isinstance(system, list):
+                system = "\n\n".join(
+                    b["text"] for b in system if b.get("type") == "text" and b.get("text")
+                )
+            if system:
+                api_messages.append({"role": "system", "content": system})
 
         for msg in messages:
             role = msg["role"]

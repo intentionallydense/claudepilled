@@ -539,10 +539,16 @@ class BackroomsOrchestrator:
             # others fall back to !search command proxy
             provider = get_provider_for_model(model_id)
             has_web_search = provider in ("anthropic", "openrouter")
+            # Wrap system prompt in cached block for Anthropic providers
+            system_for_api = system_prompt
+            if provider == "anthropic" and system_prompt:
+                system_for_api = [
+                    {"type": "text", "text": system_prompt, "cache_control": {"type": "ephemeral"}}
+                ]
             stream_kwargs = dict(
                 messages=api_messages,
                 model=get_api_model_id(model_id),
-                system=system_prompt,
+                system=system_for_api,
                 web_search=has_web_search,
                 max_tokens=4096,
             )

@@ -104,7 +104,7 @@ class ClaudeClient:
         tools: list[ToolDefinition] | None = None,
         model: str | None = None,
         max_tokens: int | None = None,
-        system: str | None = None,
+        system: str | list[dict] | None = None,
         thinking_budget: int | None = None,
         web_search: bool = True,
     ) -> Message:
@@ -123,7 +123,7 @@ class ClaudeClient:
         tools: list[ToolDefinition] | None = None,
         model: str | None = None,
         max_tokens: int | None = None,
-        system: str | None = None,
+        system: str | list[dict] | None = None,
         thinking_budget: int | None = None,
         web_search: bool = True,
         max_retries: int = 3,
@@ -288,7 +288,7 @@ class ClaudeClient:
         tools: list[ToolDefinition] | None,
         model: str | None,
         max_tokens: int | None,
-        system: str | None,
+        system: str | list[dict] | None,
         thinking_budget: int | None = None,
         web_search: bool = True,
     ) -> dict[str, Any]:
@@ -297,12 +297,18 @@ class ClaudeClient:
             "max_tokens": max_tokens or self.max_tokens,
             "messages": messages,
         }
-        sys = system if system is not None else self.system_prompt
-        if sys:
-            # Use structured block with cache_control so the system prompt
-            # gets cached across turns (90% discount on subsequent reads).
+        if system is not None:
+            if isinstance(system, list):
+                # Pre-structured blocks with cache_control (from callers
+                # that split stable/dynamic system prompt layers)
+                kwargs["system"] = system
+            elif system:
+                kwargs["system"] = [
+                    {"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}
+                ]
+        elif self.system_prompt:
             kwargs["system"] = [
-                {"type": "text", "text": sys, "cache_control": {"type": "ephemeral"}}
+                {"type": "text", "text": self.system_prompt, "cache_control": {"type": "ephemeral"}}
             ]
         tool_list = [t.to_api_format() for t in tools] if tools else []
         if web_search:
