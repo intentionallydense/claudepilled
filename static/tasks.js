@@ -123,6 +123,7 @@ function renderTasks() {
 function createTaskItem(task, isCompleted = false) {
     const li = document.createElement("li");
     li.className = "task-item" + (isCompleted ? " completed" : "");
+    li.dataset.taskId = task.id;
     if (task.id === expandedTaskId) li.className += " expanded";
 
     const urgency = task.urgency || 0;
@@ -850,7 +851,7 @@ function createIngestionItem(entry) {
 
     const actions = (entry.actions || []);
     const actionBadges = actions.map(a => {
-        if (a.type === "task") return `<span class="ingestion-badge badge-task">task</span>`;
+        if (a.type === "task") return `<span class="ingestion-badge badge-task" data-link-task="${a.id}">task</span>`;
         if (a.type === "pin") return `<span class="ingestion-badge badge-pin">pin</span>`;
         return "";
     }).join("");
@@ -881,6 +882,21 @@ function createIngestionItem(entry) {
         e.stopPropagation();
         await api("PATCH", `/api/emails/${entry.id}`);
         loadIngestionFeed();
+    });
+
+    // Task badges scroll to the linked task
+    li.querySelectorAll("[data-link-task]").forEach(badge => {
+        badge.style.cursor = "pointer";
+        badge.addEventListener("click", (e) => {
+            e.stopPropagation();
+            const taskId = badge.dataset.linkTask;
+            const taskEl = document.querySelector(`.task-item[data-task-id="${taskId}"]`);
+            if (taskEl) {
+                taskEl.scrollIntoView({ behavior: "smooth", block: "center" });
+                taskEl.classList.add("task-highlight");
+                setTimeout(() => taskEl.classList.remove("task-highlight"), 1500);
+            }
+        });
     });
 
     return li;

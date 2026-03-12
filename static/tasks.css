@@ -91,6 +91,7 @@
 }
 .task-item:last-child { border-bottom: none; }
 .task-item:hover { background: #fafafa; }
+.task-item.task-highlight { background: #fef9e7; transition: background 1.5s; }
 
 .task-row {
     display: flex;
