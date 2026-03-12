@@ -45,19 +45,20 @@ class EmailDatabase:
             "actions": json.dumps(kwargs.get("actions", [])),
             "model_used": kwargs.get("model_used"),
             "parse_result": kwargs.get("parse_result"),
+            "classification": kwargs.get("classification"),
             "archived": 0,
         }
         conn = self._connect()
         conn.execute(
             """INSERT INTO email_log
                (id, message_id, sender, subject, body_preview, received_at,
-                processed_at, actions, model_used, parse_result, archived)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                processed_at, actions, model_used, parse_result, classification, archived)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 entry["id"], entry["message_id"], entry["sender"],
                 entry["subject"], entry["body_preview"], entry["received_at"],
                 entry["processed_at"], entry["actions"], entry["model_used"],
-                entry["parse_result"], entry["archived"],
+                entry["parse_result"], entry["classification"], entry["archived"],
             ),
         )
         conn.commit()

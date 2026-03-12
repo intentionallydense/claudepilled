@@ -144,6 +144,13 @@ class Database:
                 conn.execute("INSERT INTO settings (key, value) VALUES (?, ?)", (new_key, old_val["value"]))
         conn.commit()
 
+        # email_log migrations
+        try:
+            conn.execute("ALTER TABLE email_log ADD COLUMN classification TEXT DEFAULT NULL")
+            conn.commit()
+        except sqlite3.OperationalError:
+            pass
+
         # Backfill parent_id for existing messages that lack them
         self._backfill_parent_ids(conn)
 

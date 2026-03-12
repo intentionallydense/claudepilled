@@ -59,6 +59,13 @@ async def archive_email(entry_id: str):
     return entry
 
 
+@router.get("/status")
+async def ingestion_status():
+    """Return current model health status for the tasks page banner."""
+    from claude_wrapper.email_ingestion import ingestion_status
+    return ingestion_status
+
+
 @router.post("/ingest")
 async def trigger_ingest():
     """Manual trigger: fetch and process inbox emails. Returns results."""

@@ -849,11 +849,19 @@ function createIngestionItem(entry) {
     li.className = "ingestion-item";
 
     const actions = (entry.actions || []);
-    const badges = actions.map(a => {
+    const actionBadges = actions.map(a => {
         if (a.type === "task") return `<span class="ingestion-badge badge-task">task</span>`;
         if (a.type === "pin") return `<span class="ingestion-badge badge-pin">pin</span>`;
         return "";
-    }).join("") || '<span class="ingestion-badge badge-none">no actions</span>';
+    }).join("");
+
+    // Classification badge — show category when available
+    const cls = entry.classification;
+    let clsBadge = "";
+    if (cls === "trash") clsBadge = `<span class="ingestion-badge badge-trash">trash</span>`;
+    else if (cls === "informational") clsBadge = `<span class="ingestion-badge badge-info">info</span>`;
+    else if (cls === "actionable" && !actionBadges) clsBadge = `<span class="ingestion-badge badge-none">no actions</span>`;
+    else if (!cls && !actionBadges) clsBadge = `<span class="ingestion-badge badge-none">no actions</span>`;
 
     const timeAgo = formatTimeAgo(entry.processed_at);
 
@@ -863,7 +871,7 @@ function createIngestionItem(entry) {
             <div class="ingestion-meta">
                 <span>${esc(entry.sender)}</span>
                 <span>${timeAgo}</span>
-                ${badges}
+                ${actionBadges}${clsBadge}
             </div>
         </div>
         <button class="text-btn ingestion-archive-btn">archive</button>
@@ -899,6 +907,32 @@ function setupIngestionFeed() {
 }
 
 // ---------------------------------------------------------------------------
+// Ingestion model health banner
+// ---------------------------------------------------------------------------
+async function checkIngestionStatus() {
+    const banner = document.getElementById("ingestion-banner");
+    if (!banner) return;
+    try {
+        const status = await api("GET", "/api/emails/status");
+        if (!status || status.state === "ok") {
+            banner.style.display = "none";
+            return;
+        }
+        banner.style.display = "block";
+        if (status.state === "down") {
+            banner.className = "ingestion-banner ingestion-banner-down";
+            banner.textContent = "email ingestion is down — both GLM-5 and Haiku are unavailable";
+        } else if (status.state === "fallback") {
+            banner.className = "ingestion-banner ingestion-banner-fallback";
+            banner.textContent = "GLM-5 is unavailable — email ingestion is using Haiku as fallback";
+        }
+    } catch (e) {
+        // Endpoint might not exist yet — hide banner silently
+        banner.style.display = "none";
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Init
 // ---------------------------------------------------------------------------
 document.addEventListener("DOMContentLoaded", () => {
@@ -907,5 +941,6 @@ document.addEventListener("DOMContentLoaded", () => {
     setupCompleted();
     setupBrainDump();
     setupIngestionFeed();
+    checkIngestionStatus();
     loadTasks();
 });

@@ -4,11 +4,13 @@ Called by the cron CLI (cli_main) or POST /api/emails/ingest endpoint.
 Follows briefing_assembly.py pattern: standalone module with cli_main() entry point.
 
 Flow:
-  1. Connect to IMAP inbox, fetch UNSEEN messages
-  2. For each email, call GLM5 (or Haiku fallback) to extract tasks
-  3. Create tasks based on the model's response
-  4. Log the email + actions to the email_log table
-  5. Mark email as SEEN in IMAP
+  1. Connect to IMAP inbox, fetch UNSEEN messages (without marking SEEN)
+  2. For each email: dedup check → LLM parse → create tasks → log to DB
+  3. Mark email as SEEN in IMAP only after successful processing
+  4. If processing fails, email stays UNSEEN for retry on next run
+
+Model status is tracked in `ingestion_status` so the tasks page can show
+a banner when GLM5 is down (Haiku fallback) or both models are unavailable.
 """
 
 from __future__ import annotations
@@ -16,6 +18,7 @@ from __future__ import annotations
 import email
 import email.header
 import email.utils
+import hashlib
 import html
 import imaplib
 import json
@@ -55,24 +58,54 @@ If the email is not actionable (spam, newsletter, automated notification, etc.),
 {"actions": [], "summary": "Not actionable — ...reason..."}
 """
 
+# ---------------------------------------------------------------------------
+# Ingestion status — tracks which model is active so the UI can show warnings
+# ---------------------------------------------------------------------------
+# Possible states:
+#   "ok"       — GLM5 working normally
+#   "fallback" — GLM5 down, using Haiku
+#   "down"     — both models failed
+ingestion_status: dict[str, Any] = {
+    "state": "ok",
+    "detail": None,
+    "last_updated": None,
+}
+
+
+def _update_status(state: str, detail: str | None = None) -> None:
+    ingestion_status["state"] = state
+    ingestion_status["detail"] = detail
+    ingestion_status["last_updated"] = datetime.now(timezone.utc).isoformat()
+
 
 # ---------------------------------------------------------------------------
-# IMAP fetching
+# IMAP fetching — returns emails WITHOUT marking them as SEEN
 # ---------------------------------------------------------------------------
 
-def fetch_unread_emails(
-    host: str, user: str, password: str, max_fetch: int = 20
-) -> list[dict]:
-    """Connect via IMAP, fetch UNSEEN messages, mark as SEEN. Returns parsed dicts."""
-    results = []
+def _connect_imap(host: str, user: str, password: str) -> imaplib.IMAP4_SSL | None:
+    """Connect and authenticate to IMAP. Returns connection or None."""
     try:
         mail = imaplib.IMAP4_SSL(host)
         mail.login(user, password)
         mail.select("INBOX")
+        return mail
+    except Exception as e:
+        log.error("IMAP connection failed: %s", e)
+        return None
 
+
+def fetch_unread_emails(
+    mail: imaplib.IMAP4_SSL, max_fetch: int = 100
+) -> list[dict]:
+    """Fetch UNSEEN messages without marking them as SEEN.
+
+    Each returned dict includes an '_imap_uid' field so the caller can
+    mark individual emails as SEEN after successful processing.
+    """
+    results = []
+    try:
         status, data = mail.search(None, "UNSEEN")
         if status != "OK" or not data[0]:
-            mail.logout()
             return results
 
         msg_ids = data[0].split()[:max_fetch]
@@ -84,17 +117,31 @@ def fetch_unread_emails(
                 raw = msg_data[0][1]
                 parsed = _parse_email(raw)
                 if parsed:
+                    parsed["_imap_uid"] = msg_id
                     results.append(parsed)
-                    # Mark as seen so we don't re-process
-                    mail.store(msg_id, "+FLAGS", "\\Seen")
             except Exception as e:
                 log.warning("Failed to parse email %s: %s", msg_id, e)
-
-        mail.logout()
     except Exception as e:
-        log.error("IMAP connection failed: %s", e)
+        log.error("IMAP fetch failed: %s", e)
 
     return results
+
+
+def mark_seen(mail: imaplib.IMAP4_SSL, imap_uid: bytes) -> None:
+    """Mark a single email as SEEN in IMAP."""
+    try:
+        mail.store(imap_uid, "+FLAGS", "\\Seen")
+    except Exception as e:
+        log.warning("Failed to mark email %s as SEEN: %s", imap_uid, e)
+
+
+def _make_dedup_id(em: dict) -> str:
+    """Generate a dedup key: Message-ID if present, else a content hash."""
+    if em.get("message_id"):
+        return em["message_id"]
+    # Fallback: hash of sender + subject + date
+    raw = f"{em.get('sender', '')}|{em.get('subject', '')}|{em.get('received_at', '')}"
+    return f"hash:{hashlib.sha256(raw.encode()).hexdigest()[:24]}"
 
 
 def _parse_email(raw: bytes) -> dict | None:
@@ -193,6 +240,7 @@ def parse_email_with_llm(
 
     Returns {"actions": [...], "summary": "...", "model_used": "..."}.
     parse_prompt overrides the default prompt if provided (e.g. from saved prompts).
+    Also updates ingestion_status so the tasks page can show model health.
     """
     prompt = parse_prompt or _DEFAULT_PARSE_PROMPT
     user_content = f"{prompt}\n\nEmail from: {sender}\nSubject: {subject}\n\n{body[:3000]}"
@@ -200,15 +248,18 @@ def parse_email_with_llm(
     # Try GLM5 via OpenRouter
     result = _call_glm5(user_content)
     if result is not None:
+        _update_status("ok")
         return {**result, "model_used": "GLM-5"}
 
     # Fallback to Haiku
     log.info("GLM5 unavailable, falling back to Haiku for email parsing")
     result = _call_haiku(user_content)
     if result is not None:
+        _update_status("fallback", "GLM-5 unavailable — using Haiku")
         return {**result, "model_used": "Haiku 4.5"}
 
-    # Both failed — return empty
+    # Both failed
+    _update_status("down", "Both GLM-5 and Haiku are unavailable")
     return {"actions": [], "summary": "Parsing failed", "model_used": None}
 
 
@@ -295,6 +346,10 @@ def process_inbox(
 ) -> list[dict]:
     """Fetch unread emails, parse with LLM, create tasks, log results.
 
+    Each email is fully processed (LLM → tasks → DB log) before being
+    marked as SEEN in IMAP. If processing fails, the email stays UNSEEN
+    and will be retried on the next run.
+
     parse_prompt: custom prompt to use for LLM parsing (from saved prompts).
     Returns list of email log entries for all processed emails.
     """
@@ -306,56 +361,88 @@ def process_inbox(
         log.error("EMAIL_IMAP_USER and EMAIL_IMAP_PASSWORD must be set")
         return []
 
-    emails = fetch_unread_emails(host, user, password)
-    if not emails:
-        log.info("No unread emails to process")
+    mail = _connect_imap(host, user, password)
+    if not mail:
         return []
 
-    results = []
-    for em in emails:
-        # Dedup check
-        if em["message_id"] and email_db.get_by_message_id(em["message_id"]):
-            log.info("Skipping duplicate email: %s", em["subject"])
-            continue
+    try:
+        emails = fetch_unread_emails(mail)
+        if not emails:
+            log.info("No unread emails to process")
+            return []
 
-        # Parse with LLM
-        parse_result = parse_email_with_llm(
-            em["sender"], em["subject"], em["body"], parse_prompt=parse_prompt,
-        )
+        results = []
+        for em in emails:
+            imap_uid = em.pop("_imap_uid", None)
 
-        # Execute actions — tasks only (pins disabled)
-        created_actions = []
-        for action in parse_result.get("actions", []):
-            if action.get("type") != "task":
+            # Dedup check — uses Message-ID or content hash fallback
+            dedup_id = _make_dedup_id(em)
+            if email_db.get_by_message_id(dedup_id):
+                log.info("Skipping duplicate email: %s", em["subject"])
+                # Still mark as seen so we don't re-fetch it
+                if imap_uid:
+                    mark_seen(mail, imap_uid)
                 continue
-            try:
-                task = task_db.create(
-                    title=action.get("title", em["subject"]),
-                    description=action.get("description", ""),
-                    priority=action.get("priority"),
-                    due=action.get("due"),
-                    project=action.get("project"),
-                    tags=action.get("tags", ["email-ingested"]),
-                )
-                created_actions.append({"type": "task", "id": task["id"]})
-                log.info("Created task: %s", task["title"])
-            except Exception as e:
-                log.warning("Failed to create task from email: %s", e)
 
-        # Log to email_log
-        entry = email_db.create(
-            message_id=em["message_id"],
-            sender=em["sender"],
-            subject=em["subject"],
-            body_preview=em["body"][:500],
-            received_at=em["received_at"],
-            actions=created_actions,
-            model_used=parse_result.get("model_used"),
-            parse_result=json.dumps(parse_result),
-        )
-        results.append(entry)
+            # Store the dedup_id as message_id for DB logging
+            em["message_id"] = dedup_id
 
-    return results
+            # Parse with LLM
+            parse_result = parse_email_with_llm(
+                em["sender"], em["subject"], em["body"], parse_prompt=parse_prompt,
+            )
+
+            # If both models are down, leave email UNSEEN for retry
+            if parse_result.get("model_used") is None:
+                log.warning("Skipping email (no model available): %s", em["subject"])
+                continue
+
+            classification = parse_result.get("classification")
+
+            # Only create tasks from actionable emails
+            created_actions = []
+            if classification != "trash" and classification != "informational":
+                for action in parse_result.get("actions", []):
+                    if action.get("type") != "task":
+                        continue
+                    try:
+                        task = task_db.create(
+                            title=action.get("title", em["subject"]),
+                            description=action.get("description", ""),
+                            priority=action.get("priority"),
+                            due=action.get("due"),
+                            project=action.get("project"),
+                            tags=action.get("tags", ["email-ingested"]),
+                        )
+                        created_actions.append({"type": "task", "id": task["id"]})
+                        log.info("Created task: %s", task["title"])
+                    except Exception as e:
+                        log.warning("Failed to create task from email: %s", e)
+
+            # Log to email_log
+            entry = email_db.create(
+                message_id=em["message_id"],
+                sender=em["sender"],
+                subject=em["subject"],
+                body_preview=em["body"][:500],
+                received_at=em["received_at"],
+                actions=created_actions,
+                model_used=parse_result.get("model_used"),
+                parse_result=json.dumps(parse_result),
+                classification=classification,
+            )
+            results.append(entry)
+
+            # Only mark SEEN after successful processing + logging
+            if imap_uid:
+                mark_seen(mail, imap_uid)
+
+        return results
+    finally:
+        try:
+            mail.logout()
+        except Exception:
+            pass
 
 
 # ---------------------------------------------------------------------------
