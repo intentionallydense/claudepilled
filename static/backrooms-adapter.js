@@ -377,8 +377,9 @@ const BackroomsAdapter = (function () {
         body.appendChild(content);
         container.appendChild(body);
 
-        const textEl = parentEl.querySelector(".message-text");
-        parentEl.insertBefore(container, textEl);
+        const actionsEl = parentEl.querySelector(".message-actions");
+        if (actionsEl) parentEl.insertBefore(container, actionsEl);
+        else parentEl.appendChild(container);
 
         header.onclick = () => {
             header.classList.toggle("open");
@@ -528,7 +529,10 @@ const BackroomsAdapter = (function () {
                             const speaker = speakerFromEvent(event);
                             addSpacer();
                             streamingEl = createSpeakerMessageEl(speaker, event.model_label);
-                            streamingTextEl = streamingEl.querySelector(".message-text");
+                            // Remove placeholder — text blocks created lazily
+                            // so thinking blocks interleave in chronological order
+                            streamingEl.querySelector(".message-text").remove();
+                            streamingTextEl = null;
                             streamingRawText = "";
                             messagesEl.appendChild(streamingEl);
                             if (statusEl) statusEl.textContent = `${event.model_label} is talking...`;
@@ -556,6 +560,9 @@ const BackroomsAdapter = (function () {
                                 if (label) label.textContent = "thought process";
                             }
                             streamingThinkingEl = null;
+                            // Force new text block so next text appears after thinking
+                            if (streamingTextEl) removeStreamingCursor(streamingTextEl);
+                            streamingTextEl = null;
                             return true;
 
                         case "web_search_start":
@@ -563,8 +570,9 @@ const BackroomsAdapter = (function () {
                                 streamingSearchEl = document.createElement("div");
                                 streamingSearchEl.className = "web-search-indicator";
                                 streamingSearchEl.textContent = "searching the web\u2026";
-                                // Insert before the text element so it appears above
-                                streamingEl.insertBefore(streamingSearchEl, streamingTextEl);
+                                const actionsEl = streamingEl.querySelector(".message-actions");
+                                if (actionsEl) streamingEl.insertBefore(streamingSearchEl, actionsEl);
+                                else streamingEl.appendChild(streamingSearchEl);
                                 maybeScroll();
                             }
                             return true;
@@ -579,7 +587,15 @@ const BackroomsAdapter = (function () {
                             return true;
 
                         case "text_delta":
-                            if (streamingTextEl) {
+                            if (streamingEl) {
+                                if (!streamingTextEl) {
+                                    streamingTextEl = document.createElement("div");
+                                    streamingTextEl.className = "message-text";
+                                    const a = streamingEl.querySelector(".message-actions");
+                                    if (a) streamingEl.insertBefore(streamingTextEl, a);
+                                    else streamingEl.appendChild(streamingTextEl);
+                                    streamingRawText = "";
+                                }
                                 streamingRawText += event.text;
                                 scheduleRender();
                                 maybeScroll();
@@ -764,32 +780,56 @@ const BackroomsAdapter = (function () {
                     el.dataset.rawText = content;
                     textEl.innerHTML = useMarkdown ? renderMarkdown(content) : escapeHtml(content);
                 } else if (Array.isArray(content)) {
-                    const textParts = [];
+                    // Remove placeholder .message-text — render blocks
+                    // sequentially so thinking interleaves correctly
+                    textEl.remove();
+                    const actionsEl = el.querySelector(".message-actions");
+
+                    const allRawText = [];
+                    let pendingText = [];
+
+                    function flushText() {
+                        if (!pendingText.length) return;
+                        const text = pendingText.join("");
+                        pendingText = [];
+                        const div = document.createElement("div");
+                        div.className = "message-text";
+                        if (useMarkdown) {
+                            div.innerHTML = renderMarkdown(text);
+                        } else {
+                            div.textContent = text;
+                        }
+                        if (actionsEl) el.insertBefore(div, actionsEl);
+                        else el.appendChild(div);
+                    }
+
                     for (const block of content) {
                         if (block.type === "thinking" && block.thinking) {
-                            const thinkingBlock = createBackroomsThinkingBlock(el);
-                            thinkingBlock.querySelector(".thinking-content").textContent = block.thinking;
-                            thinkingBlock.querySelector(".thinking-label").textContent = "thought process";
-                            // Start collapsed on reload
-                            thinkingBlock.querySelector(".thinking-header").classList.remove("open");
-                            thinkingBlock.querySelector(".thinking-body").classList.remove("open");
+                            flushText();
+                            const tb = createBackroomsThinkingBlock(el);
+                            tb.querySelector(".thinking-content").textContent = block.thinking;
+                            tb.querySelector(".thinking-label").textContent = "thought process";
+                            tb.querySelector(".thinking-header").classList.remove("open");
+                            tb.querySelector(".thinking-body").classList.remove("open");
                         } else if (block.type === "text" && block.text) {
-                            textParts.push(block.text);
+                            pendingText.push(block.text);
+                            allRawText.push(block.text);
                         } else if (block.type === "image" && block.source) {
+                            flushText();
+                            const div = document.createElement("div");
+                            div.className = "message-text";
                             const img = document.createElement("img");
                             img.src = `data:${block.source.media_type};base64,${block.source.data}`;
                             img.className = "message-image";
-                            textEl.appendChild(img);
+                            div.appendChild(img);
+                            if (actionsEl) el.insertBefore(div, actionsEl);
+                            else el.appendChild(div);
                         }
                     }
-                    if (textParts.length > 0) {
-                        const fullText = textParts.join("");
-                        el.dataset.rawText = fullText;
-                        if (useMarkdown) {
-                            textEl.innerHTML = renderMarkdown(fullText);
-                        } else {
-                            textEl.insertBefore(document.createTextNode(fullText), textEl.firstChild);
-                        }
+                    flushText();
+
+                    if (allRawText.length > 0) {
+                        el.dataset.rawText = allRawText.join("");
                     }
                 }
 

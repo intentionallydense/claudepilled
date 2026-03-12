@@ -422,7 +422,7 @@ function createChatCore(config) {
     let streamingThinkingEl = null;
     let streamingToolCalls = {};
     let streamingSearchEl = null;
-    let toolResultsSinceLastText = false;
+    let needNewTextBlock = false;
 
     // -----------------------------------------------------------------------
     // Models
@@ -560,7 +560,7 @@ function createChatCore(config) {
         streamingTextEl = null;
         streamingThinkingEl = null;
         streamingToolCalls = {};
-        toolResultsSinceLastText = false;
+        needNewTextBlock = false;
         isStreaming = false;
         editingId = null;
         el.input.disabled = false;
@@ -600,6 +600,7 @@ function createChatCore(config) {
                     if (label) label.textContent = "thought process";
                 }
                 streamingThinkingEl = null;
+                needNewTextBlock = true;
                 break;
 
             case "web_search_start":
@@ -617,19 +618,19 @@ function createChatCore(config) {
                     streamingSearchEl = null;
                 }
                 // Next text_delta starts a fresh text block after the indicator
-                toolResultsSinceLastText = true;
+                needNewTextBlock = true;
                 break;
 
             case "text_delta":
                 if (!streamingEl) startStreamingMessage();
-                if (toolResultsSinceLastText) {
+                if (!streamingTextEl || needNewTextBlock) {
                     // Finalize the previous text block — remove its cursor
                     if (streamingTextEl) removeStreamingCursor(streamingTextEl);
                     streamingTextEl = document.createElement("div");
                     streamingTextEl.className = "message-text";
                     insertBeforeActions(streamingEl, streamingTextEl);
                     streamingRawText = "";
-                    toolResultsSinceLastText = false;
+                    needNewTextBlock = false;
                 }
                 streamingRawText += event.text;
                 scheduleMarkdownRender();
@@ -658,7 +659,7 @@ function createChatCore(config) {
                 break;
 
             case "tool_result":
-                toolResultsSinceLastText = true;
+                needNewTextBlock = true;
                 if (event.tool_use_id && streamingToolCalls[event.tool_use_id]) {
                     streamingToolCalls[event.tool_use_id].result = event.tool_result;
                     renderToolCallBlock(streamingEl, streamingToolCalls[event.tool_use_id]);
@@ -715,7 +716,7 @@ function createChatCore(config) {
                 streamingTextEl = null;
                 streamingThinkingEl = null;
                 streamingToolCalls = {};
-                toolResultsSinceLastText = false;
+                needNewTextBlock = false;
                 isStreaming = false;
                 editingId = null;
                 el.sendBtn.disabled = false;
@@ -787,7 +788,10 @@ function createChatCore(config) {
             el.messages.appendChild(spacer);
         }
         streamingEl = createMessageEl("assistant");
-        streamingTextEl = streamingEl.querySelector(".message-text");
+        // Remove placeholder .message-text — text blocks created lazily
+        // so thinking/tool blocks interleave in chronological order
+        streamingEl.querySelector(".message-text").remove();
+        streamingTextEl = null;
         el.messages.appendChild(streamingEl);
     }
 
@@ -811,8 +815,7 @@ function createChatCore(config) {
         body.appendChild(content);
         container.appendChild(body);
 
-        const textEl = parentEl.querySelector(".message-text");
-        parentEl.insertBefore(container, textEl);
+        insertBeforeActions(parentEl, container);
 
         header.onclick = () => {
             header.classList.toggle("open");
@@ -881,38 +884,64 @@ function createChatCore(config) {
                 msgEl.dataset.rawText = content;
             }
         } else if (Array.isArray(content)) {
-            const textParts = [];
+            // Remove placeholder .message-text — blocks are rendered
+            // sequentially so thinking/tool/text interleave correctly
+            textEl.remove();
+
+            const allRawText = [];
+            let pendingText = [];
+
+            function flushText() {
+                if (!pendingText.length) return;
+                const text = pendingText.join("");
+                pendingText = [];
+                const div = document.createElement("div");
+                div.className = "message-text";
+                if (role === "assistant") {
+                    div.innerHTML = renderMarkdown(text);
+                } else {
+                    div.textContent = text;
+                }
+                insertBeforeActions(msgEl, div);
+                return div;
+            }
+
             for (const block of content) {
                 if (block.type === "thinking" && block.thinking) {
-                    const thinkingBlock = createThinkingBlock(msgEl);
-                    thinkingBlock.querySelector(".thinking-content").textContent = block.thinking;
-                    thinkingBlock.querySelector(".thinking-label").textContent = "thought process";
-                    thinkingBlock.querySelector(".thinking-header").classList.remove("open");
-                    thinkingBlock.querySelector(".thinking-body").classList.remove("open");
+                    flushText();
+                    const tb = createThinkingBlock(msgEl);
+                    tb.querySelector(".thinking-content").textContent = block.thinking;
+                    tb.querySelector(".thinking-label").textContent = "thought process";
+                    tb.querySelector(".thinking-header").classList.remove("open");
+                    tb.querySelector(".thinking-body").classList.remove("open");
                 } else if (block.type === "text" && block.text) {
-                    textParts.push(block.text);
+                    pendingText.push(block.text);
+                    allRawText.push(block.text);
                 } else if (block.type === "tool_use") {
+                    flushText();
                     renderToolCallBlock(msgEl, {
                         name: block.name,
                         input: block.input,
                         result: null,
                     });
                 } else if (block.type === "image" && block.source) {
+                    // Flush text first so the image lands in its own block
+                    const textDiv = flushText() || (() => {
+                        const div = document.createElement("div");
+                        div.className = "message-text";
+                        insertBeforeActions(msgEl, div);
+                        return div;
+                    })();
                     const img = document.createElement("img");
                     img.src = `data:${block.source.media_type};base64,${block.source.data}`;
                     img.className = "message-image";
-                    textEl.appendChild(img);
+                    textDiv.appendChild(img);
                 }
             }
-            if (textParts.length > 0) {
-                const fullText = textParts.join("");
-                if (role === "assistant") {
-                    textEl.innerHTML = renderMarkdown(fullText);
-                } else {
-                    const textNode = document.createTextNode(fullText);
-                    textEl.insertBefore(textNode, textEl.firstChild);
-                    msgEl.dataset.rawText = fullText;
-                }
+            flushText();
+
+            if (role === "user" && allRawText.length > 0) {
+                msgEl.dataset.rawText = allRawText.join("");
             }
         }
 
@@ -922,35 +951,46 @@ function createChatCore(config) {
 
     function appendAssistantContent(msgEl, content) {
         if (!Array.isArray(content)) return;
-        const textParts = [];
+        let pendingText = [];
+
+        function flushText() {
+            if (!pendingText.length) return;
+            const div = document.createElement("div");
+            div.className = "message-text";
+            div.innerHTML = renderMarkdown(pendingText.join(""));
+            pendingText = [];
+            insertBeforeActions(msgEl, div);
+        }
+
         for (const block of content) {
             if (block.type === "thinking" && block.thinking) {
-                const thinkingBlock = createThinkingBlock(msgEl);
-                thinkingBlock.querySelector(".thinking-content").textContent = block.thinking;
-                thinkingBlock.querySelector(".thinking-label").textContent = "thought process";
-                thinkingBlock.querySelector(".thinking-header").classList.remove("open");
-                thinkingBlock.querySelector(".thinking-body").classList.remove("open");
+                flushText();
+                const tb = createThinkingBlock(msgEl);
+                tb.querySelector(".thinking-content").textContent = block.thinking;
+                tb.querySelector(".thinking-label").textContent = "thought process";
+                tb.querySelector(".thinking-header").classList.remove("open");
+                tb.querySelector(".thinking-body").classList.remove("open");
             } else if (block.type === "text" && block.text) {
-                textParts.push(block.text);
+                pendingText.push(block.text);
             } else if (block.type === "tool_use") {
+                flushText();
                 renderToolCallBlock(msgEl, {
                     name: block.name,
                     input: block.input,
                     result: null,
                 });
             } else if (block.type === "image" && block.source) {
+                flushText();
+                const div = document.createElement("div");
+                div.className = "message-text";
                 const img = document.createElement("img");
                 img.src = `data:${block.source.media_type};base64,${block.source.data}`;
                 img.className = "message-image";
-                msgEl.querySelector(".message-text").appendChild(img);
+                div.appendChild(img);
+                insertBeforeActions(msgEl, div);
             }
         }
-        if (textParts.length > 0) {
-            const newTextEl = document.createElement("div");
-            newTextEl.className = "message-text";
-            newTextEl.innerHTML = renderMarkdown(textParts.join(""));
-            insertBeforeActions(msgEl, newTextEl);
-        }
+        flushText();
     }
 
     function renderCompactionDivider(compaction) {
