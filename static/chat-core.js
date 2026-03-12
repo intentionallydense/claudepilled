@@ -284,6 +284,7 @@ function buildTreeLayout(treeData, nodeMapEl, layoutConfig, onNodeClick) {
 
     const spacerDiv = document.createElement("div");
     spacerDiv.style.height = totalHeight + "px";
+    spacerDiv.style.width = svgW + "px";
     spacerDiv.style.pointerEvents = "none";
     nodeMapEl.appendChild(spacerDiv);
 
@@ -1520,7 +1521,10 @@ function createChatCore(config) {
         renderConversationMessages(conv.messages);
         scrollToBottom();
         await loadTree();
+        // Scroll tree to bottom and center on the current (last) node
         el.nodeMap.scrollTop = el.nodeMap.scrollHeight;
+        const lastOnPathNode = treeNodes.filter(tn => tn.onPath).sort((a, b) => a.depth - b.depth).pop();
+        if (lastOnPathNode) scrollTreeToNodeX(lastOnPathNode);
         connectWebSocket(convId);
 
         // Auto-toggle thinking
@@ -1565,6 +1569,14 @@ function createChatCore(config) {
     async function navigateToNode(nodeId) {
         if (isStreaming || !conversationId) return;
 
+        // Snap tree view to the clicked node
+        const clickedTreeNode = treeNodes.find(tn => tn.id === nodeId);
+        if (clickedTreeNode) {
+            const idx = treeNodes.indexOf(clickedTreeNode);
+            if (idx >= 0) highlightTreeNode(idx);
+            scrollTreeToNodeX(clickedTreeNode);
+        }
+
         if (treeData && treeData.current_path && treeData.current_path.includes(nodeId)) {
             const msgEl = el.messages.querySelector(`.message[data-msg-id="${nodeId}"]`);
             if (msgEl) {
@@ -1578,6 +1590,12 @@ function createChatCore(config) {
             renderConversationMessages(conv.messages);
             scrollToBottom();
             await loadTree();
+            // After tree rebuild, snap to the switched-to node on the new path
+            const switchedNode = treeNodes.find(tn => tn.id === nodeId);
+            if (switchedNode) {
+                highlightTreeNode(treeNodes.indexOf(switchedNode));
+                scrollTreeToNodeX(switchedNode);
+            }
         } catch (e) {
             console.error("Failed to switch branch:", e);
         }
@@ -1589,9 +1607,17 @@ function createChatCore(config) {
         }
         if (treeNodes[index]) {
             treeNodes[index].el.classList.add("scroll-highlight");
-            treeNodes[index].el.scrollIntoView({ behavior: "smooth", block: "nearest" });
+            treeNodes[index].el.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "nearest" });
             currentHighlight = index;
         }
+    }
+
+    /** Scroll the node-map so a given tree node's x position is centered horizontally. */
+    function scrollTreeToNodeX(node) {
+        if (!node || !el.nodeMap) return;
+        const panelW = el.nodeMap.clientWidth;
+        const targetLeft = node.x - panelW / 2;
+        el.nodeMap.scrollTo({ left: Math.max(0, targetLeft), behavior: "smooth" });
     }
 
     function syncTreeWithScroll() {
@@ -1609,15 +1635,19 @@ function createChatCore(config) {
 
         const scrollBottom = el.messages.scrollHeight - el.messages.scrollTop - el.messages.clientHeight;
         if (scrollBottom < 40) {
-            const idx = treeNodes.indexOf(onPathNodes[onPathNodes.length - 1]);
+            const last = onPathNodes[onPathNodes.length - 1];
+            const idx = treeNodes.indexOf(last);
             if (idx >= 0) highlightTreeNode(idx);
             el.nodeMap.scrollTo({ top: el.nodeMap.scrollHeight, behavior: "smooth" });
+            scrollTreeToNodeX(last);
             return;
         }
         if (el.messages.scrollTop < 40) {
-            const idx = treeNodes.indexOf(onPathNodes[0]);
+            const first = onPathNodes[0];
+            const idx = treeNodes.indexOf(first);
             if (idx >= 0) highlightTreeNode(idx);
             el.nodeMap.scrollTo({ top: 0, behavior: "smooth" });
+            scrollTreeToNodeX(first);
             return;
         }
 
@@ -1703,6 +1733,7 @@ function createChatCore(config) {
 
             const target = sameLayer[nextIdx];
             highlightTreeNode(treeNodes.indexOf(target));
+            scrollTreeToNodeX(target);
 
             if (!target.onPath) {
                 navigateToNode(target.id);
