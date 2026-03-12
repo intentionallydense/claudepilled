@@ -1129,11 +1129,6 @@ function createChatCore(config) {
         textarea.value = currentText;
         form.appendChild(textarea);
 
-        const previewArea = document.createElement("div");
-        previewArea.className = "image-preview-area";
-        form.appendChild(previewArea);
-        renderEditImagePreviews(previewArea);
-
         const actions = document.createElement("div");
         actions.className = "edit-actions";
 
@@ -1149,6 +1144,11 @@ function createChatCore(config) {
         actions.appendChild(sendEditBtn);
 
         form.appendChild(actions);
+
+        const previewArea = document.createElement("div");
+        previewArea.className = "image-preview-area";
+        form.appendChild(previewArea);
+        renderEditImagePreviews(previewArea);
         msgEl.appendChild(form);
 
         function autoGrow() {

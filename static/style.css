@@ -1274,6 +1274,9 @@ body {
     padding: 0.5rem 0;
     flex-wrap: wrap;
 }
+.image-preview-area:empty {
+    display: none;
+}
 .image-preview {
     position: relative;
     display: inline-block;
