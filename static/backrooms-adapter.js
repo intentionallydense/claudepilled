@@ -197,6 +197,7 @@ const BackroomsAdapter = (function () {
         textarea.addEventListener("input", autoGrow);
         textarea.addEventListener("keydown", (e) => {
             if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submitBackroomsEdit(parentId, textarea.value.trim(), form); }
+            preventTextareaScrollLeak(e, textarea);
         });
         textarea.focus();
         requestAnimationFrame(autoGrow);

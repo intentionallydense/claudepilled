@@ -25,13 +25,33 @@ def init(pin_db: PinDatabase) -> None:
 
 
 class CreatePinRequest(BaseModel):
-    type: str  # 'image', 'text', 'link', 'message'
-    content: str
+    """Pin creation request.
+
+    Accepts both `content` and `text` for the pin body, and defaults `type`
+    to "text" — Apple Shortcuts may send field names that differ from our
+    canonical schema.
+    """
+    type: str = "text"  # 'image', 'text', 'link', 'message'
+    content: str | None = None
+    text: str | None = None  # alias for content (Shortcuts sends this)
     note: str | None = None
     source: str = "sylvia"
     conversation_id: str | None = None
     message_id: str | None = None
-    tags: list[str] = []
+    tags: list[str] | str = []
+
+    def get_content(self) -> str:
+        return self.content or self.text or ""
+
+    def get_tags(self) -> list[str]:
+        """Normalize tags — accepts a list or comma-separated string.
+
+        Apple Shortcuts sends tags as a plain string instead of a JSON array,
+        so we handle both formats.
+        """
+        if isinstance(self.tags, str):
+            return [t.strip() for t in self.tags.split(",") if t.strip()]
+        return self.tags
 
 
 class UpdatePinTagsRequest(BaseModel):
@@ -51,16 +71,20 @@ async def list_pins(limit: int = 200):
 
 @router.post("")
 async def create_pin(req: CreatePinRequest):
+
+    pin_content = req.get_content()
+    if not pin_content:
+        return JSONResponse(status_code=400, content={"error": "content is required"})
     if req.type not in ("image", "text", "link", "message"):
         return JSONResponse(status_code=400, content={"error": "Invalid pin type"})
     pin = _pin_db.create(
         type=req.type,
-        content=req.content,
+        content=pin_content,
         note=req.note,
         source=req.source,
         conversation_id=req.conversation_id,
         message_id=req.message_id,
-        tags=req.tags,
+        tags=req.get_tags(),
     )
     return pin
 
@@ -92,6 +116,13 @@ async def update_pin_tags(pin_id: str, req: UpdatePinTagsRequest):
     if pin is None:
         return JSONResponse(status_code=404, content={"error": "Pin not found"})
     return pin
+
+
+@router.post("/{pin_id}/archive")
+async def archive_pin(pin_id: str):
+    """Archive a pin — hides from board but preserves data."""
+    _pin_db.archive(pin_id)
+    return {"ok": True}
 
 
 @router.delete("/{pin_id}")

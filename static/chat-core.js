@@ -12,6 +12,24 @@
 // ---------------------------------------------------------------------------
 // Pure utilities (no state, globally available)
 // ---------------------------------------------------------------------------
+
+/**
+ * Prevent arrow-up/down from scrolling the page when the cursor is on the
+ * first or last line of a textarea. Call from a keydown handler.
+ */
+function preventTextareaScrollLeak(e, textarea) {
+    if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
+    const val = textarea.value;
+    const pos = textarea.selectionStart;
+    if (e.key === "ArrowUp") {
+        // On first line if there's no newline before the cursor
+        if (!val.substring(0, pos).includes("\n")) e.preventDefault();
+    } else {
+        // On last line if there's no newline after the cursor
+        if (!val.substring(pos).includes("\n")) e.preventDefault();
+    }
+}
+
 function escapeHtml(str) {
     const d = document.createElement("div");
     d.textContent = str;
@@ -1222,6 +1240,7 @@ function createChatCore(config) {
                 e.preventDefault();
                 submitEdit(parentId, textarea.value.trim(), form);
             }
+            preventTextareaScrollLeak(e, textarea);
         });
     }
 
@@ -1709,12 +1728,13 @@ function createChatCore(config) {
         // Input auto-resize
         el.input.addEventListener("input", () => autoResizeInput());
 
-        // Send on Enter
+        // Send on Enter, prevent arrow-key scroll leak on parent
         el.input.addEventListener("keydown", (e) => {
             if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();
                 sendMessage();
             }
+            preventTextareaScrollLeak(e, el.input);
         });
 
         // Image paste (with compression)

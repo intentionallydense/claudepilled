@@ -58,12 +58,16 @@ class PinDatabase:
             CREATE INDEX IF NOT EXISTS idx_pins_created ON pins(created);
         """)
         conn.commit()
-        # Idempotent migration: add tags column
-        try:
-            conn.execute("ALTER TABLE pins ADD COLUMN tags TEXT DEFAULT '[]'")
-            conn.commit()
-        except sqlite3.OperationalError:
-            pass
+        # Idempotent migrations
+        for migration in [
+            "ALTER TABLE pins ADD COLUMN tags TEXT DEFAULT '[]'",
+            "ALTER TABLE pins ADD COLUMN archived INTEGER DEFAULT 0",
+        ]:
+            try:
+                conn.execute(migration)
+                conn.commit()
+            except sqlite3.OperationalError:
+                pass
         conn.close()
 
     # ------------------------------------------------------------------
@@ -104,14 +108,28 @@ class PinDatabase:
         conn.close()
         return self._row_to_dict(row) if row else None
 
-    def list_pins(self, limit: int = 200) -> list[dict]:
-        """List all pins, newest first."""
+    def list_pins(self, limit: int = 200, include_archived: bool = False) -> list[dict]:
+        """List pins, newest first. Excludes archived by default."""
         conn = self._connect()
-        rows = conn.execute(
-            "SELECT * FROM pins ORDER BY created DESC LIMIT ?", (limit,)
-        ).fetchall()
+        if include_archived:
+            rows = conn.execute(
+                "SELECT * FROM pins ORDER BY created DESC LIMIT ?", (limit,)
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM pins WHERE archived = 0 ORDER BY created DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
         conn.close()
         return [self._row_to_dict(r) for r in rows]
+
+    def archive(self, pin_id: str) -> bool:
+        """Archive a pin (soft-delete, hidden from board but preserved)."""
+        conn = self._connect()
+        conn.execute("UPDATE pins SET archived = 1 WHERE id = ?", (pin_id,))
+        conn.commit()
+        conn.close()
+        return True
 
     def delete(self, pin_id: str) -> bool:
         """Permanently delete a pin."""

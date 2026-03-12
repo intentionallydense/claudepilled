@@ -328,22 +328,7 @@ async function loadConversations() {
             li.appendChild(dup);
         }
 
-        const del = document.createElement("button");
-        del.className = "delete-btn";
-        del.textContent = "\u00d7";
-        del.onclick = async (e) => {
-            e.stopPropagation();
-            const delPath = c.type === "backrooms"
-                ? `/backrooms/sessions/${c.id}`
-                : `/conversations/${c.id}`;
-            await api(delPath, { method: "DELETE" });
-            if (chatCore?.getConversationId() === c.id) {
-                chatCore.destroy();
-                showWelcome();
-            }
-            loadConversations();
-        };
-        li.appendChild(del);
+        // No delete button — conversations are permanent
 
         li.onclick = () => { openConversation(c.id, c.type || "chat"); toggleSidebar(false); };
         conversationList.appendChild(li);
@@ -782,16 +767,17 @@ function createPinEl(pin) {
     el.className = "board-pin";
     el.dataset.pinId = pin.id;
 
-    const del = document.createElement("button");
-    del.className = "pin-delete";
-    del.textContent = "\u00d7";
-    del.onclick = async (e) => {
+    const archiveBtn = document.createElement("button");
+    archiveBtn.className = "pin-delete";
+    archiveBtn.textContent = "\u2193";
+    archiveBtn.title = "Archive";
+    archiveBtn.onclick = async (e) => {
         e.stopPropagation();
-        await api(`/pins/${pin.id}`, { method: "DELETE" });
+        await api(`/pins/${pin.id}/archive`, { method: "POST" });
         el.remove();
         boardPins = boardPins.filter(p => p.id !== pin.id);
     };
-    el.appendChild(del);
+    el.appendChild(archiveBtn);
 
     if (pin.type === "image") {
         const img = document.createElement("img");
@@ -1215,6 +1201,7 @@ boardInput.addEventListener("keydown", (e) => {
         e.preventDefault();
         document.getElementById("board-input-btn").click();
     }
+    preventTextareaScrollLeak(e, boardInput);
 });
 
 // Board drag and drop

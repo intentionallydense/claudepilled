@@ -260,6 +260,10 @@ async def chat_sync(conversation_id: str, req: SyncChatRequest):
     if conv is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
 
+    # Brain dump conversations use GLM5 (cheap, has tool use)
+    if conv.prompt_id == "brain_dump" and conv.model != "openrouter/z-ai/glm-5":
+        manager.db.update_conversation_model(conversation_id, "openrouter/z-ai/glm-5")
+
     text_parts = []
     title = None
     async for event in manager.stream_chat(conversation_id, req.message, req.thinking_budget):
