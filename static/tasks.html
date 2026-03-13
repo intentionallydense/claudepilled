@@ -13,7 +13,7 @@
     <link rel="stylesheet" href="/tasks.css">
 </head>
 <body>
-    <div id="app" class="app-simple">
+    <div id="app" class="app-tasks">
         <button id="menu-btn" class="menu-btn">&#9776;</button>
         <div id="sidebar-backdrop" class="sidebar-backdrop"></div>
 
@@ -112,8 +112,27 @@
                 <ul id="ingestion-list" class="ingestion-list"></ul>
             </section>
         </main>
+
+        <aside id="agenda-panel" class="agenda-panel">
+            <div class="agenda-header">
+                <span class="agenda-title">agenda</span>
+                <div class="agenda-controls">
+                    <button class="agenda-nav-btn" id="agenda-prev">&larr;</button>
+                    <button class="agenda-nav-btn agenda-today-btn" id="agenda-today">today</button>
+                    <button class="agenda-nav-btn" id="agenda-next">&rarr;</button>
+                    <select id="agenda-range" class="filter-select">
+                        <option value="1">day</option>
+                        <option value="3">3 days</option>
+                        <option value="7" selected>week</option>
+                    </select>
+                </div>
+            </div>
+            <div id="agenda-status" class="agenda-status"></div>
+            <div id="agenda-timeline" class="agenda-timeline"></div>
+        </aside>
     </div>
     <script src="/tasks.js"></script>
+    <script src="/agenda.js"></script>
     <script>if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js");</script>
     <script>
     // Mobile sidebar toggle (shared pattern with chat/briefing)

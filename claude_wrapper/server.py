@@ -39,6 +39,10 @@ from claude_wrapper.task_routes import init as init_task_routes
 from claude_wrapper.pin_db import PinDatabase
 from claude_wrapper.pin_routes import router as pin_router
 from claude_wrapper.pin_routes import init as init_pin_routes
+from claude_wrapper.calendar_db import CalendarDatabase
+from claude_wrapper.calendar_routes import router as calendar_router
+from claude_wrapper.calendar_routes import init as init_calendar_routes
+from claude_wrapper.calendar_tools import register_calendar_tools
 from claude_wrapper.email_db import EmailDatabase
 from claude_wrapper.email_routes import router as email_router
 from claude_wrapper.email_routes import init as init_email_routes
@@ -56,6 +60,7 @@ app.include_router(briefing_progress_router)
 app.include_router(briefing_anki_router)
 app.include_router(pin_router)
 app.include_router(email_router)
+app.include_router(calendar_router)
 
 # ---------------------------------------------------------------------------
 # Globals — initialized in lifespan
@@ -102,6 +107,9 @@ async def startup():
     init_pin_routes(pin_db_instance)
     email_db = EmailDatabase(db)
     init_email_routes(email_db, task_db, db=db)
+    cal_db = CalendarDatabase(db)
+    init_calendar_routes(cal_db, db)
+    register_calendar_tools(registry, cal_db, db)
     briefing_db = BriefingDatabase(db)
     init_all_series(briefing_db)
     manager = ConversationManager(client=client, tool_registry=registry, db=db, file_db=file_db_instance, pin_db=pin_db_instance)

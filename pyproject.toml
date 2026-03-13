@@ -18,6 +18,9 @@ dependencies = [
     "feedparser>=6.0.0",
     "python-multipart>=0.0.12",
     "pymupdf>=1.25.0",
+    "google-auth>=2.0.0",
+    "google-auth-oauthlib>=1.0.0",
+    "google-api-python-client>=2.0.0",
 ]
 
 [project.optional-dependencies]
