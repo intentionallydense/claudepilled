@@ -26,7 +26,7 @@ cal_db: CalendarDatabase | None = None
 main_db: Database | None = None
 
 # Google API scopes — read+write events
-SCOPES = ["https://www.googleapis.com/auth/calendar.readonly"]
+SCOPES = ["https://www.googleapis.com/auth/calendar"]
 
 
 def init(calendar_db: CalendarDatabase, db: Database) -> None:

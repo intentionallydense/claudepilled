@@ -161,6 +161,16 @@ class CalendarDatabase:
         conn.commit()
         conn.close()
 
+    def delete_event(self, google_event_id: str) -> None:
+        """Remove a single event from the cache by its Google event ID."""
+        conn = self._connect()
+        conn.execute(
+            "DELETE FROM calendar_events WHERE google_event_id = ?",
+            (google_event_id,),
+        )
+        conn.commit()
+        conn.close()
+
     def clear_all(self) -> None:
         """Wipe the entire event cache."""
         conn = self._connect()

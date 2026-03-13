@@ -52,6 +52,7 @@ def register_calendar_tools(
             "date": now.strftime("%A %B %d, %Y"),
             "events": [
                 {
+                    "event_id": e.get("google_event_id"),
                     "summary": e["summary"],
                     "start": e["start_time"],
                     "end": e["end_time"],
@@ -97,6 +98,7 @@ def register_calendar_tools(
             if date_key not in by_date:
                 by_date[date_key] = []
             by_date[date_key].append({
+                "event_id": e.get("google_event_id"),
                 "summary": e["summary"],
                 "start": e["start_time"],
                 "end": e["end_time"],
@@ -159,5 +161,95 @@ def register_calendar_tools(
             parsed = _parse_gcal_event(created, "primary")
             cal_db.upsert_events([parsed])
             return json.dumps({"ok": True, "event_id": created["id"], "summary": summary})
+        except Exception as exc:
+            return json.dumps({"error": str(exc)})
+
+    @registry.tool(
+        description=(
+            "Update an existing Google Calendar event. Requires the event_id "
+            "(from calendar_today or calendar_week results). Only the fields "
+            "you provide will be changed — omit fields to leave them as-is. "
+            "Use this when the user wants to reschedule, rename, or edit an event."
+        )
+    )
+    def calendar_update(
+        event_id: str,
+        summary: str = "",
+        start: str = "",
+        end: str = "",
+        description: str = "",
+        location: str = "",
+    ) -> str:
+        if not _is_connected():
+            return json.dumps({"error": "Google Calendar not connected. Visit /tasks to connect."})
+
+        try:
+            from claude_wrapper.calendar_routes import _get_credentials, _build_service, _parse_gcal_event
+        except ImportError:
+            return json.dumps({"error": "Google Calendar API libraries not installed"})
+
+        creds = _get_credentials()
+        if not creds or not creds.valid:
+            return json.dumps({"error": "Google Calendar credentials expired. Re-authorize at /tasks."})
+
+        service = _build_service(creds)
+
+        try:
+            # Fetch the existing event first
+            existing = service.events().get(
+                calendarId="primary", eventId=event_id,
+            ).execute()
+
+            # Only update fields that were provided
+            if summary:
+                existing["summary"] = summary
+            if start:
+                existing["start"] = {"dateTime": start}
+            if end:
+                existing["end"] = {"dateTime": end}
+            if description:
+                existing["description"] = description
+            if location:
+                existing["location"] = location
+
+            updated = service.events().update(
+                calendarId="primary", eventId=event_id, body=existing,
+            ).execute()
+
+            parsed = _parse_gcal_event(updated, "primary")
+            cal_db.upsert_events([parsed])
+            return json.dumps({"ok": True, "event_id": event_id, "summary": updated.get("summary", "")})
+        except Exception as exc:
+            return json.dumps({"error": str(exc)})
+
+    @registry.tool(
+        description=(
+            "Delete a Google Calendar event. Requires the event_id "
+            "(from calendar_today or calendar_week results). "
+            "Use this when the user wants to cancel or remove an event."
+        )
+    )
+    def calendar_delete(event_id: str) -> str:
+        if not _is_connected():
+            return json.dumps({"error": "Google Calendar not connected. Visit /tasks to connect."})
+
+        try:
+            from claude_wrapper.calendar_routes import _get_credentials, _build_service
+        except ImportError:
+            return json.dumps({"error": "Google Calendar API libraries not installed"})
+
+        creds = _get_credentials()
+        if not creds or not creds.valid:
+            return json.dumps({"error": "Google Calendar credentials expired. Re-authorize at /tasks."})
+
+        service = _build_service(creds)
+
+        try:
+            service.events().delete(
+                calendarId="primary", eventId=event_id,
+            ).execute()
+            # Remove from local cache
+            cal_db.delete_event(event_id)
+            return json.dumps({"ok": True, "event_id": event_id})
         except Exception as exc:
             return json.dumps({"error": str(exc)})
