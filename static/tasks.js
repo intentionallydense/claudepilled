@@ -876,15 +876,21 @@ function createIngestionItem(entry) {
 
     const summaryHtml = summary
         ? `<div class="ingestion-summary">${esc(summary)}</div>` : "";
-    // Strip HTML tags and collapse whitespace for a readable preview
+    // Strip HTML tags and collapse whitespace for a readable preview.
+    // Some HTML-only emails produce CSS junk as their "text" — detect and skip.
     let previewText = "";
     if (entry.body_preview) {
         const tmp = document.createElement("div");
         tmp.innerHTML = entry.body_preview;
-        previewText = (tmp.textContent || tmp.innerText || "")
-            .replace(/[ \t]+/g, " ")
-            .replace(/\n{3,}/g, "\n\n")
-            .trim();
+        const raw = (tmp.textContent || tmp.innerText || "").trim();
+        // If it looks like CSS/code junk rather than readable text, skip it
+        const junkRatio = (raw.match(/[{};:@#.]/g) || []).length / (raw.length || 1);
+        if (junkRatio < 0.05 && raw.length > 0) {
+            previewText = raw
+                .replace(/[ \t]+/g, " ")
+                .replace(/\n{3,}/g, "\n\n")
+                .trim();
+        }
     }
     const previewHtml = previewText
         ? `<div class="ingestion-preview">${esc(previewText)}</div>` : "";
