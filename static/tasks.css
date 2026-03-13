@@ -602,7 +602,7 @@
 }
 
 .agenda-status .agenda-connected {
-    font-size: 0.7rem;
+    font-size: 0.75rem;
     color: #888;
     font-style: italic;
     display: flex;

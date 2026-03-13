@@ -384,13 +384,12 @@ function _formatDateKey(date) {
 }
 
 function _formatDayHeader(date, isToday) {
-    const days = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
-    const months = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+    const days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+    const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
     const dayName = days[date.getDay()];
     const monthName = months[date.getMonth()];
     const prefix = isToday ? "Today — " : "";
-    const label = `${prefix}${dayName} ${monthName} ${date.getDate()}`;
-    return label.charAt(0).toUpperCase() + label.slice(1);
+    return `${prefix}${dayName} ${monthName} ${date.getDate()}`;
 }
 
 function _formatTime(isoStr) {
