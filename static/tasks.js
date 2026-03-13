@@ -876,8 +876,18 @@ function createIngestionItem(entry) {
 
     const summaryHtml = summary
         ? `<div class="ingestion-summary">${esc(summary)}</div>` : "";
-    const previewHtml = entry.body_preview
-        ? `<div class="ingestion-preview">${esc(entry.body_preview)}</div>` : "";
+    // Strip HTML tags and collapse whitespace for a readable preview
+    let previewText = "";
+    if (entry.body_preview) {
+        const tmp = document.createElement("div");
+        tmp.innerHTML = entry.body_preview;
+        previewText = (tmp.textContent || tmp.innerText || "")
+            .replace(/[ \t]+/g, " ")
+            .replace(/\n{3,}/g, "\n\n")
+            .trim();
+    }
+    const previewHtml = previewText
+        ? `<div class="ingestion-preview">${esc(previewText)}</div>` : "";
 
     li.innerHTML = `
         <div class="ingestion-main">
