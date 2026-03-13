@@ -866,6 +866,19 @@ function createIngestionItem(entry) {
 
     const timeAgo = formatTimeAgo(entry.processed_at);
 
+    // Extract summary from parse_result if available
+    let summary = "";
+    try {
+        const parsed = typeof entry.parse_result === "string"
+            ? JSON.parse(entry.parse_result) : entry.parse_result;
+        if (parsed && parsed.summary) summary = parsed.summary;
+    } catch (_) {}
+
+    const summaryHtml = summary
+        ? `<div class="ingestion-summary">${esc(summary)}</div>` : "";
+    const previewHtml = entry.body_preview
+        ? `<div class="ingestion-preview">${esc(entry.body_preview)}</div>` : "";
+
     li.innerHTML = `
         <div class="ingestion-main">
             <div class="ingestion-subject">${esc(entry.subject)}</div>
@@ -874,9 +887,21 @@ function createIngestionItem(entry) {
                 <span>${timeAgo}</span>
                 ${actionBadges}${clsBadge}
             </div>
+            ${summaryHtml}
+            <div class="ingestion-detail" style="display:none;">
+                ${previewHtml}
+            </div>
         </div>
         <button class="text-btn ingestion-archive-btn">archive</button>
     `;
+
+    // Click to expand/collapse body preview
+    li.style.cursor = "pointer";
+    li.addEventListener("click", (e) => {
+        if (e.target.closest(".ingestion-archive-btn, [data-link-task]")) return;
+        const detail = li.querySelector(".ingestion-detail");
+        if (detail) detail.style.display = detail.style.display === "none" ? "block" : "none";
+    });
 
     li.querySelector(".ingestion-archive-btn").addEventListener("click", async (e) => {
         e.stopPropagation();
