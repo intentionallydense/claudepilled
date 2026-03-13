@@ -26,7 +26,7 @@ cal_db: CalendarDatabase | None = None
 main_db: Database | None = None
 
 # Google API scopes — read+write events
-SCOPES = ["https://www.googleapis.com/auth/calendar.events"]
+SCOPES = ["https://www.googleapis.com/auth/calendar.readonly"]
 
 
 def init(calendar_db: CalendarDatabase, db: Database) -> None:
@@ -138,8 +138,8 @@ async def calendar_auth(request: Request):
         )
 
     from google_auth_oauthlib.flow import Flow
-    # Determine redirect URI from the request
-    redirect_uri = str(request.url_for("calendar_callback"))
+    # Google OAuth requires a real domain or localhost — raw IPs are rejected.
+    redirect_uri = "http://localhost:8000/api/calendar/callback"
 
     flow = Flow.from_client_config(
         {
@@ -158,8 +158,9 @@ async def calendar_auth(request: Request):
         access_type="offline",
         prompt="consent",
     )
-    # Store state for callback verification
+    # Store state and code_verifier (PKCE) for callback verification
     main_db.set_setting("gcal_oauth_state", state)
+    main_db.set_setting("gcal_code_verifier", flow.code_verifier)
 
     return RedirectResponse(url=auth_url)
 
@@ -175,7 +176,7 @@ async def calendar_callback(request: Request, code: str = "", state: str = ""):
     client_secret = os.environ.get("GOOGLE_CLIENT_SECRET", "")
 
     from google_auth_oauthlib.flow import Flow
-    redirect_uri = str(request.url_for("calendar_callback"))
+    redirect_uri = "http://localhost:8000/api/calendar/callback"
 
     flow = Flow.from_client_config(
         {
@@ -190,6 +191,8 @@ async def calendar_callback(request: Request, code: str = "", state: str = ""):
         redirect_uri=redirect_uri,
     )
 
+    # Restore PKCE code verifier from the auth step
+    flow.code_verifier = main_db.get_setting("gcal_code_verifier")
     flow.fetch_token(code=code)
     _save_credentials(flow.credentials)
 

@@ -388,8 +388,9 @@ function _formatDayHeader(date, isToday) {
     const months = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
     const dayName = days[date.getDay()];
     const monthName = months[date.getMonth()];
-    const prefix = isToday ? "today — " : "";
-    return `${prefix}${dayName} ${monthName} ${date.getDate()}`;
+    const prefix = isToday ? "Today — " : "";
+    const label = `${prefix}${dayName} ${monthName} ${date.getDate()}`;
+    return label.charAt(0).toUpperCase() + label.slice(1);
 }
 
 function _formatTime(isoStr) {

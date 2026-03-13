@@ -89,7 +89,9 @@
 /* Assemble button (in briefing panel header)                         */
 /* ------------------------------------------------------------------ */
 .briefing-assemble-btn {
-    margin-left: auto;
+    position: absolute;
+    right: 1rem;
+    top: 0.75rem;
     padding: 0.35rem 0.75rem;
     background: #111;
     color: #fff;
