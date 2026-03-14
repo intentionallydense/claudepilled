@@ -103,12 +103,26 @@ AVAILABLE_MODELS = [
     {"id": "gemini/gemini-2.0-flash", "name": "Gemini 2.0 Flash", "provider": "gemini", "api_model_id": "gemini-2.0-flash", "input_cost": 0.1, "output_cost": 0.4},
     # -- OpenRouter — closed-source models via single API key --
     # OpenAI
+    {"id": "openrouter/openai/gpt-5.4", "name": "GPT-5.4", "provider": "openrouter", "api_model_id": "openai/gpt-5.4", "input_cost": 2.5, "output_cost": 15.0},
+    {"id": "openrouter/openai/gpt-5.4-pro", "name": "GPT-5.4 Pro", "provider": "openrouter", "api_model_id": "openai/gpt-5.4-pro", "input_cost": 30.0, "output_cost": 180.0},
+    {"id": "openrouter/openai/gpt-5.3", "name": "GPT-5.3", "provider": "openrouter", "api_model_id": "openai/gpt-5.3-chat", "input_cost": 1.75, "output_cost": 14.0},
     {"id": "openrouter/openai/gpt-5.2", "name": "GPT-5.2", "provider": "openrouter", "api_model_id": "openai/gpt-5.2", "input_cost": 1.75, "output_cost": 14.0},
     {"id": "openrouter/openai/gpt-5.2-pro", "name": "GPT-5.2 Pro", "provider": "openrouter", "api_model_id": "openai/gpt-5.2-pro", "input_cost": 21.0, "output_cost": 168.0},
+    {"id": "openrouter/openai/gpt-5.1", "name": "GPT-5.1", "provider": "openrouter", "api_model_id": "openai/gpt-5.1", "input_cost": 1.25, "output_cost": 10.0},
+    {"id": "openrouter/openai/gpt-5", "name": "GPT-5", "provider": "openrouter", "api_model_id": "openai/gpt-5", "input_cost": 1.25, "output_cost": 10.0},
+    {"id": "openrouter/openai/gpt-5-pro", "name": "GPT-5 Pro", "provider": "openrouter", "api_model_id": "openai/gpt-5-pro", "input_cost": 15.0, "output_cost": 120.0},
     {"id": "openrouter/openai/gpt-5-mini", "name": "GPT-5 Mini", "provider": "openrouter", "api_model_id": "openai/gpt-5-mini", "input_cost": 0.25, "output_cost": 2.0},
+    {"id": "openrouter/openai/gpt-5-nano", "name": "GPT-5 Nano", "provider": "openrouter", "api_model_id": "openai/gpt-5-nano", "input_cost": 0.05, "output_cost": 0.4},
+    {"id": "openrouter/openai/gpt-4.1", "name": "GPT-4.1", "provider": "openrouter", "api_model_id": "openai/gpt-4.1", "input_cost": 2.0, "output_cost": 8.0},
+    {"id": "openrouter/openai/gpt-4.1-mini", "name": "GPT-4.1 Mini", "provider": "openrouter", "api_model_id": "openai/gpt-4.1-mini", "input_cost": 0.4, "output_cost": 1.6},
+    {"id": "openrouter/openai/gpt-4.1-nano", "name": "GPT-4.1 Nano", "provider": "openrouter", "api_model_id": "openai/gpt-4.1-nano", "input_cost": 0.1, "output_cost": 0.4},
     # Google Gemini
+    {"id": "openrouter/google/gemini-3.1-pro", "name": "Gemini 3.1 Pro", "provider": "openrouter", "api_model_id": "google/gemini-3.1-pro-preview", "input_cost": 2.0, "output_cost": 12.0},
+    {"id": "openrouter/google/gemini-3.1-flash-lite", "name": "Gemini 3.1 Flash Lite", "provider": "openrouter", "api_model_id": "google/gemini-3.1-flash-lite-preview", "input_cost": 0.25, "output_cost": 1.5},
     {"id": "openrouter/google/gemini-3-pro", "name": "Gemini 3 Pro", "provider": "openrouter", "api_model_id": "google/gemini-3-pro-preview", "input_cost": 2.0, "output_cost": 12.0},
     {"id": "openrouter/google/gemini-3-flash", "name": "Gemini 3 Flash", "provider": "openrouter", "api_model_id": "google/gemini-3-flash-preview", "input_cost": 0.5, "output_cost": 3.0},
+    {"id": "openrouter/google/gemini-2.5-pro", "name": "Gemini 2.5 Pro", "provider": "openrouter", "api_model_id": "google/gemini-2.5-pro", "input_cost": 1.25, "output_cost": 10.0},
+    {"id": "openrouter/google/gemini-2.5-flash", "name": "Gemini 2.5 Flash", "provider": "openrouter", "api_model_id": "google/gemini-2.5-flash", "input_cost": 0.3, "output_cost": 2.5},
     # DeepSeek
     {"id": "openrouter/deepseek/v3.2", "name": "DeepSeek V3.2", "provider": "openrouter", "api_model_id": "deepseek/deepseek-v3.2", "input_cost": 0.25, "output_cost": 0.4},
     {"id": "openrouter/deepseek/v3.2-speciale", "name": "DeepSeek V3.2 Speciale", "provider": "openrouter", "api_model_id": "deepseek/deepseek-v3.2-speciale", "input_cost": 0.4, "output_cost": 1.2},
