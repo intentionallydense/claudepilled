@@ -116,6 +116,15 @@ AVAILABLE_MODELS = [
     {"id": "openrouter/openai/gpt-4.1", "name": "GPT-4.1", "provider": "openrouter", "api_model_id": "openai/gpt-4.1", "input_cost": 2.0, "output_cost": 8.0},
     {"id": "openrouter/openai/gpt-4.1-mini", "name": "GPT-4.1 Mini", "provider": "openrouter", "api_model_id": "openai/gpt-4.1-mini", "input_cost": 0.4, "output_cost": 1.6},
     {"id": "openrouter/openai/gpt-4.1-nano", "name": "GPT-4.1 Nano", "provider": "openrouter", "api_model_id": "openai/gpt-4.1-nano", "input_cost": 0.1, "output_cost": 0.4},
+    # OpenAI reasoning (o-series)
+    {"id": "openrouter/openai/o3", "name": "o3", "provider": "openrouter", "api_model_id": "openai/o3", "input_cost": 2.0, "output_cost": 8.0},
+    {"id": "openrouter/openai/o3-pro", "name": "o3 Pro", "provider": "openrouter", "api_model_id": "openai/o3-pro", "input_cost": 20.0, "output_cost": 80.0},
+    {"id": "openrouter/openai/o3-mini", "name": "o3 Mini", "provider": "openrouter", "api_model_id": "openai/o3-mini", "input_cost": 1.1, "output_cost": 4.4},
+    {"id": "openrouter/openai/o3-mini-high", "name": "o3 Mini High", "provider": "openrouter", "api_model_id": "openai/o3-mini-high", "input_cost": 1.1, "output_cost": 4.4},
+    {"id": "openrouter/openai/o4-mini", "name": "o4 Mini", "provider": "openrouter", "api_model_id": "openai/o4-mini", "input_cost": 1.1, "output_cost": 4.4},
+    {"id": "openrouter/openai/o4-mini-high", "name": "o4 Mini High", "provider": "openrouter", "api_model_id": "openai/o4-mini-high", "input_cost": 1.1, "output_cost": 4.4},
+    {"id": "openrouter/openai/o1", "name": "o1", "provider": "openrouter", "api_model_id": "openai/o1", "input_cost": 15.0, "output_cost": 60.0},
+    {"id": "openrouter/openai/o1-pro", "name": "o1 Pro", "provider": "openrouter", "api_model_id": "openai/o1-pro", "input_cost": 150.0, "output_cost": 600.0},
     # Google Gemini
     {"id": "openrouter/google/gemini-3.1-pro", "name": "Gemini 3.1 Pro", "provider": "openrouter", "api_model_id": "google/gemini-3.1-pro-preview", "input_cost": 2.0, "output_cost": 12.0},
     {"id": "openrouter/google/gemini-3.1-flash-lite", "name": "Gemini 3.1 Flash Lite", "provider": "openrouter", "api_model_id": "google/gemini-3.1-flash-lite-preview", "input_cost": 0.25, "output_cost": 1.5},
@@ -126,10 +135,30 @@ AVAILABLE_MODELS = [
     # DeepSeek
     {"id": "openrouter/deepseek/v3.2", "name": "DeepSeek V3.2", "provider": "openrouter", "api_model_id": "deepseek/deepseek-v3.2", "input_cost": 0.25, "output_cost": 0.4},
     {"id": "openrouter/deepseek/v3.2-speciale", "name": "DeepSeek V3.2 Speciale", "provider": "openrouter", "api_model_id": "deepseek/deepseek-v3.2-speciale", "input_cost": 0.4, "output_cost": 1.2},
+    {"id": "openrouter/deepseek/v3.2-exp", "name": "DeepSeek V3.2 Exp", "provider": "openrouter", "api_model_id": "deepseek/deepseek-v3.2-exp", "input_cost": 0.27, "output_cost": 0.41},
+    {"id": "openrouter/deepseek/v3.1", "name": "DeepSeek V3.1", "provider": "openrouter", "api_model_id": "deepseek/deepseek-chat-v3.1", "input_cost": 0.15, "output_cost": 0.75},
+    {"id": "openrouter/deepseek/v3.1-terminus", "name": "DeepSeek V3.1 Terminus", "provider": "openrouter", "api_model_id": "deepseek/deepseek-v3.1-terminus", "input_cost": 0.21, "output_cost": 0.79},
+    {"id": "openrouter/deepseek/r1", "name": "DeepSeek R1", "provider": "openrouter", "api_model_id": "deepseek/deepseek-r1", "input_cost": 0.7, "output_cost": 2.5},
+    {"id": "openrouter/deepseek/r1-0528", "name": "DeepSeek R1 0528", "provider": "openrouter", "api_model_id": "deepseek/deepseek-r1-0528", "input_cost": 0.45, "output_cost": 2.15},
     # Qwen
     {"id": "openrouter/qwen/qwen3.5-plus", "name": "Qwen 3.5 Plus", "provider": "openrouter", "api_model_id": "qwen/qwen3.5-plus-02-15", "input_cost": 0.4, "output_cost": 2.4},
+    {"id": "openrouter/qwen/qwen3.5-397b", "name": "Qwen 3.5 397B", "provider": "openrouter", "api_model_id": "qwen/qwen3.5-397b-a17b", "input_cost": 0.39, "output_cost": 2.34},
+    {"id": "openrouter/qwen/qwen3.5-122b", "name": "Qwen 3.5 122B", "provider": "openrouter", "api_model_id": "qwen/qwen3.5-122b-a10b", "input_cost": 0.26, "output_cost": 2.08},
+    {"id": "openrouter/qwen/qwen3.5-27b", "name": "Qwen 3.5 27B", "provider": "openrouter", "api_model_id": "qwen/qwen3.5-27b", "input_cost": 0.2, "output_cost": 1.56},
+    {"id": "openrouter/qwen/qwen3.5-flash", "name": "Qwen 3.5 Flash", "provider": "openrouter", "api_model_id": "qwen/qwen3.5-flash-02-23", "input_cost": 0.1, "output_cost": 0.4},
+    {"id": "openrouter/qwen/qwen3-max", "name": "Qwen 3 Max", "provider": "openrouter", "api_model_id": "qwen/qwen3-max", "input_cost": 1.2, "output_cost": 6.0},
+    {"id": "openrouter/qwen/qwen3-max-thinking", "name": "Qwen 3 Max (thinking)", "provider": "openrouter", "api_model_id": "qwen/qwen3-max-thinking", "input_cost": 0.78, "output_cost": 3.9},
+    {"id": "openrouter/qwen/qwen3-coder-plus", "name": "Qwen 3 Coder Plus", "provider": "openrouter", "api_model_id": "qwen/qwen3-coder-plus", "input_cost": 0.65, "output_cost": 3.25},
+    {"id": "openrouter/qwen/qwen3-coder", "name": "Qwen 3 Coder", "provider": "openrouter", "api_model_id": "qwen/qwen3-coder", "input_cost": 0.22, "output_cost": 1.0},
+    {"id": "openrouter/qwen/qwen3-coder-flash", "name": "Qwen 3 Coder Flash", "provider": "openrouter", "api_model_id": "qwen/qwen3-coder-flash", "input_cost": 0.2, "output_cost": 0.97},
+    {"id": "openrouter/qwen/qwen3-235b", "name": "Qwen 3 235B", "provider": "openrouter", "api_model_id": "qwen/qwen3-235b-a22b", "input_cost": 0.45, "output_cost": 1.82},
+    {"id": "openrouter/qwen/qwq-32b", "name": "QwQ 32B", "provider": "openrouter", "api_model_id": "qwen/qwq-32b", "input_cost": 0.15, "output_cost": 0.4},
     # GLM (Zhipu)
     {"id": "openrouter/z-ai/glm-5", "name": "GLM-5", "provider": "openrouter", "api_model_id": "z-ai/glm-5", "input_cost": 0.95, "output_cost": 2.55},
+    {"id": "openrouter/z-ai/glm-4.7", "name": "GLM 4.7", "provider": "openrouter", "api_model_id": "z-ai/glm-4.7", "input_cost": 0.38, "output_cost": 1.98},
+    {"id": "openrouter/z-ai/glm-4.7-flash", "name": "GLM 4.7 Flash", "provider": "openrouter", "api_model_id": "z-ai/glm-4.7-flash", "input_cost": 0.06, "output_cost": 0.4},
+    {"id": "openrouter/z-ai/glm-4.6", "name": "GLM 4.6", "provider": "openrouter", "api_model_id": "z-ai/glm-4.6", "input_cost": 0.39, "output_cost": 1.9},
+    {"id": "openrouter/z-ai/glm-4.5", "name": "GLM 4.5", "provider": "openrouter", "api_model_id": "z-ai/glm-4.5", "input_cost": 0.6, "output_cost": 2.2},
     # MiniMax
     {"id": "openrouter/minimax/m2.5", "name": "MiniMax M2.5", "provider": "openrouter", "api_model_id": "minimax/minimax-m2.5", "input_cost": 0.29, "output_cost": 1.2},
     # Kimi (Moonshot)
