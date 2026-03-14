@@ -33,6 +33,7 @@ from claude_wrapper.models import (
     StreamEventType,
     get_provider_for_model,
     get_api_model_id,
+    get_model_name,
 )
 from claude_wrapper.tools import ToolRegistry
 
@@ -749,6 +750,12 @@ class ConversationManager:
         files_block = self._build_injected_files_block(conv.id)
         if files_block:
             layers.append(files_block)
+
+        # Substitute {self_label} with the model's display name so chat
+        # prompts can reference the model naturally (backrooms does this
+        # separately via _substitute_variables).
+        model_label = get_model_name(conv.model)
+        layers = [l.replace("{self_label}", model_label) for l in layers]
 
         return layers
 
