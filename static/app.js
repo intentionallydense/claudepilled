@@ -824,14 +824,14 @@ chatCore.attachListeners();
 
 // Initialize Column4Manager for the board panel
 let column4Manager = null;
-if (boardPanel) {
+if (boardPanel && typeof Column4Manager !== "undefined") {
     column4Manager = new Column4Manager(boardPanel, {
         api,
         loadAllTags,
         loadContext,
         getConversationId: () => chatCore?.getConversationId(),
     });
-    column4Manager.init();
+    column4Manager.init().catch(e => console.error("Column4Manager init failed:", e));
 }
 
 chatCore.loadModels().then(() => {
