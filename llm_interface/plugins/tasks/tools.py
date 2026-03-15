@@ -214,6 +214,9 @@ def register_task_tools(registry: ToolRegistry, task_db: TaskDatabase) -> None:
                     if key in ("project", "tag", "status"):
                         kwargs[key] = val
         tasks = task_db.list_tasks(**kwargs)
+        # Exclude completed tasks unless explicitly requested via status:completed
+        if "status" not in kwargs:
+            tasks = [t for t in tasks if t.get("status") != "completed"]
         for t in tasks:
             for field in ("tags", "depends", "annotations"):
                 if isinstance(t.get(field), str):
