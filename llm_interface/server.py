@@ -104,6 +104,10 @@ async def startup():
         db.save_prompt("email_ingestion", "Email ingestion", _DEFAULT_PARSE_PROMPT)
         db.set_setting("email_ingestion_prompt_id", "email_ingestion")
 
+    # Mount static files LAST so the catch-all "/" doesn't shadow plugin routes
+    if _static_dir.exists():
+        app.mount("/", StaticFiles(directory=str(_static_dir), html=True), name="static")
+
 
 # ---------------------------------------------------------------------------
 # Plugin endpoints
@@ -880,12 +884,7 @@ async def remove_context_tag(conversation_id: str, tag: str):
     return {"ok": True}
 
 
-# ---------------------------------------------------------------------------
-# Static files (must be last so it doesn't shadow API routes)
-# ---------------------------------------------------------------------------
-
-if _static_dir.exists():
-    app.mount("/", StaticFiles(directory=str(_static_dir), html=True), name="static")
+# Static files mount moved to end of startup() so it doesn't shadow plugin routes.
 
 
 # ---------------------------------------------------------------------------
