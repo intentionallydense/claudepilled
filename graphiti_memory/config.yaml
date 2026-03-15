@@ -1,6 +1,10 @@
 # Model settings
-extraction_model: "claude-sonnet-4-20250514"    # For entity extraction during ingestion
-chat_model: "claude-sonnet-4-20250514"          # For conversations (override via CLI --model)
+extraction_model: "glm-5"              # Z.AI model for entity extraction
+chat_model: "claude-sonnet-4-20250514" # For memory-chat CLI (override via --model)
+
+# Z.AI
+zai_base_url: "https://api.z.ai/api/paas/v4"
+# zai_api_key set via ZAI_API_KEY env var
 
 # Neo4j
 neo4j_uri: "bolt://localhost:7687"
@@ -8,14 +12,14 @@ neo4j_user: "neo4j"
 # neo4j_password set via NEO4J_PASSWORD env var
 
 # Retrieval settings
-max_context_tokens: 1500        # Max tokens for injected context
-max_search_results: 10          # Max graph search results
+max_context_tokens: 1500
+max_search_results: 10
 
 # Ingestion settings
-episode_delay_seconds: 0.5      # Delay between episode ingestions
-checkpoint_interval: 50         # Save checkpoint every N episodes
+episode_delay_seconds: 0.5
+checkpoint_interval: 50
 
-# User preferences (injected into system prompt)
+# User preferences (injected into system prompt for memory-chat)
 user_preferences: |
   The user enjoys emotionally present, playful conversation. Directness
   is appreciated. Skip hollow praise. Varied sentence structure,

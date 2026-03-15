@@ -2,6 +2,9 @@
 
 Manages the Graphiti client instance and Neo4j connection.
 All graph operations go through the client returned by get_client().
+
+Supports both Anthropic and Z.AI (OpenAI-compatible) LLM clients.
+Set extraction_model to a glm-* model to use Z.AI directly.
 """
 
 from __future__ import annotations
@@ -10,14 +13,15 @@ import os
 
 import yaml
 from graphiti_core import Graphiti
-from graphiti_core.llm_client import AnthropicClient
 
 
 _DEFAULT_CONFIG = {
-    "extraction_model": "claude-sonnet-4-20250514",
+    "extraction_model": "glm-5",
     "neo4j_uri": "bolt://localhost:7687",
     "neo4j_user": "neo4j",
     "neo4j_password": "",
+    "zai_api_key": "",
+    "zai_base_url": "https://api.z.ai/api/paas/v4",
 }
 
 
@@ -37,8 +41,37 @@ def load_config(config_path: str = "config.yaml") -> dict:
     config["neo4j_uri"] = os.environ.get(
         "NEO4J_URI", config.get("neo4j_uri", _DEFAULT_CONFIG["neo4j_uri"])
     )
+    config["zai_api_key"] = os.environ.get(
+        "ZAI_API_KEY", config.get("zai_api_key", "")
+    )
 
     return config
+
+
+def _make_llm_client(config: dict):
+    """Create the appropriate LLM client based on model name."""
+    model = config["extraction_model"]
+
+    if model.startswith("glm"):
+        # Z.AI via OpenAI-compatible client
+        from graphiti_core.llm_client import OpenAIGenericClient
+        from graphiti_core.llm_client.config import LLMConfig
+
+        api_key = config["zai_api_key"]
+        if not api_key:
+            raise ValueError("ZAI_API_KEY required for GLM models")
+
+        return OpenAIGenericClient(
+            config=LLMConfig(
+                api_key=api_key,
+                model=model,
+                base_url=config["zai_base_url"],
+            ),
+        )
+    else:
+        # Anthropic
+        from graphiti_core.llm_client import AnthropicClient
+        return AnthropicClient(model=model)
 
 
 async def get_client(config: dict | None = None) -> Graphiti:
@@ -49,7 +82,7 @@ async def get_client(config: dict | None = None) -> Graphiti:
     if config is None:
         config = load_config()
 
-    llm_client = AnthropicClient(model=config["extraction_model"])
+    llm_client = _make_llm_client(config)
 
     client = Graphiti(
         neo4j_uri=config["neo4j_uri"],
