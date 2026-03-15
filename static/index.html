@@ -21,11 +21,11 @@
             <div class="sidebar-header">
                 <span class="sidebar-title">claude</span>
                 <nav class="sidebar-nav">
-                    <a href="/briefing" class="text-btn">briefing</a>
-                    <a href="/tasks" class="text-btn">tasks</a>
+                    <span id="plugin-nav"></span>
                     <a id="new-backrooms-btn" class="text-btn" href="#">backrooms</a>
                     <a href="/settings" class="text-btn">settings</a>
                 </nav>
+                <script src="/nav-loader.js"></script>
             </div>
             <div class="sidebar-search-container">
                 <input id="sidebar-search" class="sidebar-search" type="text" placeholder="search messages...">
@@ -95,20 +95,9 @@
             <div id="node-map" class="node-map"></div>
         </aside>
 
-        <!-- Moodboard panel -->
+        <!-- Column 4: pluggable panels (managed by Column4Manager) -->
         <aside id="board-panel" class="board-panel">
-            <div class="board-panel-header">
-                <span class="section-label" style="margin-bottom:0;">board</span>
-            </div>
-            <div id="board-content" class="board-content">
-                <div id="board-pins" class="board-pins"></div>
-            </div>
-            <div class="board-input-area">
-                <textarea id="board-input" placeholder="pin something... #tag" rows="1"></textarea>
-                <div class="board-input-actions">
-                    <button id="board-input-btn" class="board-input-btn">pin</button>
-                </div>
-            </div>
+            <!-- Column4Manager populates tab bar + content here -->
         </aside>
 
         <!-- Backrooms: prompts modal -->
@@ -156,7 +145,8 @@
     <script src="/latex-rendering.js"></script>
     <script src="/chat-core.js?v=3"></script>
     <script src="/backrooms-adapter.js?v=3"></script>
-    <script src="/app.js?v=29"></script>
+    <script src="/column4.js"></script>
+    <script src="/app.js?v=30"></script>
     <script>if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js");</script>
 </body>
 </html>

@@ -70,14 +70,15 @@ class ConversationManager:
         client: ClaudeClient,
         tool_registry: ToolRegistry | None = None,
         db: Database | None = None,
-        file_db: "FileDatabase | None" = None,
-        pin_db: "PinDatabase | None" = None,
+        context_sources: list | None = None,
+        # Deprecated — use context_sources instead
+        file_db=None,
+        pin_db=None,
     ):
         self.client = client
         self.tools = tool_registry or ToolRegistry()
         self.db = db or Database()
-        self.file_db = file_db
-        self.pin_db = pin_db
+        self.context_sources = context_sources or []
         self._openrouter_client = None  # lazy-init AsyncOpenAI for system tasks
 
     def _get_client_and_tools(self, model: str):
@@ -778,44 +779,14 @@ class ConversationManager:
         ]
 
     def _build_injected_files_block(self, conversation_id: str) -> str:
-        """Build XML block of injected files and tagged pins for the system prompt."""
+        """Build XML block of injected context from all registered ContextSources."""
         parts = []
-
-        # Inject active files
-        if self.file_db:
-            active_file_ids = self.file_db.get_active_file_ids(conversation_id)
-            files = []
-            for fid in active_file_ids:
-                f = self.file_db.get_file(fid)
-                if f:
-                    files.append(f)
-            if files:
-                files.sort(key=lambda f: f["filename"])
-                parts.append("<injected_files>")
-                for f in files:
-                    tags_str = ", ".join(f["tags"]) if isinstance(f["tags"], list) else f["tags"]
-                    parts.append(f'<file name="{f["filename"]}" tags="{tags_str}" tokens="{f["token_count"]}">')
-                    parts.append(f["content"])
-                    parts.append("</file>")
-                parts.append("</injected_files>")
-
-        # Inject active pins (skip image pins — data URIs too large for context)
-        if self.pin_db:
-            active_pin_ids = self.pin_db.get_active_pin_ids(conversation_id)
-            pins = []
-            for pid in active_pin_ids:
-                p = self.pin_db.get(pid)
-                if p and p["type"] != "image":
-                    pins.append(p)
-            if pins:
-                parts.append("<injected_pins>")
-                for p in pins:
-                    tags_str = ", ".join(p["tags"]) if isinstance(p["tags"], list) else str(p["tags"])
-                    parts.append(f'<pin type="{p["type"]}" tags="{tags_str}">')
-                    parts.append(p["content"])
-                    parts.append("</pin>")
-                parts.append("</injected_pins>")
-
+        for source in self.context_sources:
+            items = source.get_active(conversation_id)
+            if items:
+                block = source.format_block(items)
+                if block:
+                    parts.append(block)
         return "\n".join(parts)
 
     # ------------------------------------------------------------------

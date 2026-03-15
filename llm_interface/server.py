@@ -37,10 +37,9 @@ app = FastAPI(title="LLM Interface")
 # ---------------------------------------------------------------------------
 manager: ConversationManager | None = None
 backrooms: BackroomsOrchestrator | None = None
-file_db_instance = None  # FileDatabase, from files plugin
-pin_db_instance = None  # PinDatabase, from pins plugin
 svc_registry: ServiceRegistry | None = None
 loaded_plugins: list = []
+context_sources: list = []  # ContextSource instances from all plugins
 _static_dir = Path(__file__).resolve().parent.parent / "static"
 
 
@@ -62,7 +61,7 @@ def _load_example_tools() -> ToolRegistry:
 
 @app.on_event("startup")
 async def startup():
-    global manager, backrooms, file_db_instance, pin_db_instance, svc_registry, loaded_plugins
+    global manager, backrooms, svc_registry, loaded_plugins, context_sources
     api_key = os.environ.get("ANTHROPIC_API_KEY", "")
     if not api_key:
         print("WARNING: ANTHROPIC_API_KEY not set. Set it in .env or environment.")
@@ -83,13 +82,14 @@ async def startup():
         tool_registry=registry,
     )
 
-    # Get plugin-managed instances for core modules that still need them
-    file_db_instance = svc_registry.get("file_db")
-    pin_db_instance = svc_registry.get("pin_db")
+    # Collect context sources from all plugins (for tag injection)
+    context_sources = []
+    for p in loaded_plugins:
+        context_sources.extend(p.context_sources())
 
-    # Core services that depend on plugin-provided instances
-    manager = ConversationManager(client=client, tool_registry=registry, db=db, file_db=file_db_instance, pin_db=pin_db_instance)
-    backrooms = BackroomsOrchestrator(client=client, db=db, file_db=file_db_instance, pin_db=pin_db_instance)
+    # Core services
+    manager = ConversationManager(client=client, tool_registry=registry, db=db, context_sources=context_sources)
+    backrooms = BackroomsOrchestrator(client=client, db=db, context_sources=context_sources)
 
     # Register core services so plugins can lazily resolve them
     svc_registry.register("conversation_manager", manager)
@@ -131,6 +131,27 @@ async def plugin_nav():
                 })
     entries.sort(key=lambda e: e["order"])
     return entries
+
+
+@app.get("/api/plugins/panels")
+async def plugin_panels():
+    """Aggregate column 4 panel declarations from all loaded plugins."""
+    panels = []
+    for p in loaded_plugins:
+        manifest = p.frontend_manifest()
+        if manifest and manifest.column4_panels:
+            for panel in manifest.column4_panels:
+                panels.append({
+                    "name": panel.name,
+                    "label": panel.label,
+                    "icon": panel.icon,
+                    "order": panel.order,
+                    "js_module": panel.js_module,
+                    "context": panel.context,
+                    "plugin": p.name,
+                })
+    panels.sort(key=lambda p: p["order"])
+    return panels
 
 
 # ---------------------------------------------------------------------------
@@ -326,19 +347,14 @@ _active_backrooms_tasks: dict[str, asyncio.Task] = {}
 
 
 async def _handle_tag_injection(ws: WebSocket, conversation_id: str, inject_tags: list[str]) -> None:
-    """Resolve tags to files/pins and emit context_update. Shared by chat and backrooms WS handlers."""
+    """Resolve tags via all registered ContextSources and emit context_update."""
     if not inject_tags:
         return
-    if file_db_instance:
-        matched_files = file_db_instance.get_files_by_tags(inject_tags)
-        if matched_files:
-            new_ids = [f["id"] for f in matched_files]
-            file_db_instance.add_active_file_ids(conversation_id, new_ids)
-    if pin_db_instance:
-        matched_pins = pin_db_instance.get_pins_by_tags(inject_tags)
-        if matched_pins:
-            new_pin_ids = [p["id"] for p in matched_pins]
-            pin_db_instance.add_active_pin_ids(conversation_id, new_pin_ids)
+    for source in context_sources:
+        matched = source.resolve_tags(inject_tags)
+        if matched:
+            new_ids = [item["id"] for item in matched]
+            source.set_active(conversation_id, new_ids)
     context_data = _build_context_response(conversation_id)
     await ws.send_text(json.dumps({
         "type": StreamEventType.CONTEXT_UPDATE.value,
@@ -818,38 +834,23 @@ async def websocket_backrooms(ws: WebSocket, session_id: str):
 # ---------------------------------------------------------------------------
 
 def _build_context_response(conversation_id: str) -> dict:
-    """Build unified context response with both files and pins."""
-    files = []
+    """Build context response from all registered ContextSources.
+
+    Returns {files: [...], pins: [...], total_tokens: int} — keyed by source
+    name so the frontend gets the same shape it expects.
+    """
+    result: dict = {}
     total_tokens = 0
-    if file_db_instance:
-        active_file_ids = file_db_instance.get_active_file_ids(conversation_id)
-        for fid in active_file_ids:
-            f = file_db_instance.get_file(fid)
-            if f:
-                files.append({
-                    "id": f["id"],
-                    "filename": f["filename"],
-                    "tags": f["tags"],
-                    "token_count": f["token_count"],
-                })
-                total_tokens += f["token_count"]
-    pins = []
-    if pin_db_instance:
-        active_pin_ids = pin_db_instance.get_active_pin_ids(conversation_id)
-        for pid in active_pin_ids:
-            p = pin_db_instance.get(pid)
-            if p:
-                # Estimate token count for pins (~4 chars per token)
-                pin_tokens = len(p["content"]) // 4
-                pins.append({
-                    "id": p["id"],
-                    "type": p["type"],
-                    "content": p["content"][:100],  # truncated preview for context bar
-                    "tags": p["tags"],
-                    "token_count": pin_tokens,
-                })
-                total_tokens += pin_tokens
-    return {"files": files, "pins": pins, "total_tokens": total_tokens}
+    for source in context_sources:
+        items = source.get_active(conversation_id)
+        previews = []
+        for item in items:
+            preview = source.build_preview(item)
+            total_tokens += preview.get("token_count", 0)
+            previews.append(preview)
+        result[source.name] = previews
+    result["total_tokens"] = total_tokens
+    return result
 
 
 @app.get("/api/conversations/{conversation_id}/context")
@@ -857,30 +858,24 @@ async def get_conversation_context(conversation_id: str):
     return _build_context_response(conversation_id)
 
 
-@app.delete("/api/conversations/{conversation_id}/context/{file_id}")
-async def remove_context_file(conversation_id: str, file_id: str):
-    updated = file_db_instance.remove_active_file_ids(conversation_id, [file_id])
-    return {"active_file_ids": updated}
-
-
-@app.delete("/api/conversations/{conversation_id}/context/pin/{pin_id}")
-async def remove_context_pin(conversation_id: str, pin_id: str):
-    updated = pin_db_instance.remove_active_pin_ids(conversation_id, [pin_id])
-    return {"active_pin_ids": updated}
+@app.delete("/api/conversations/{conversation_id}/context/{source_name}/{item_id}")
+async def remove_context_item(conversation_id: str, source_name: str, item_id: str):
+    """Remove a single item from active context by source name and item ID."""
+    for source in context_sources:
+        if source.name == source_name:
+            updated = source.remove_active(conversation_id, [item_id])
+            return {f"active_{source_name}_ids": updated}
+    return {"error": f"Unknown context source: {source_name}"}
 
 
 @app.delete("/api/conversations/{conversation_id}/context/tag/{tag}")
 async def remove_context_tag(conversation_id: str, tag: str):
-    # Remove matching files
-    if file_db_instance:
-        matching_files = file_db_instance.get_files_by_tags([tag])
-        file_ids_to_remove = [f["id"] for f in matching_files]
-        file_db_instance.remove_active_file_ids(conversation_id, file_ids_to_remove)
-    # Remove matching pins
-    if pin_db_instance:
-        matching_pins = pin_db_instance.get_pins_by_tags([tag])
-        pin_ids_to_remove = [p["id"] for p in matching_pins]
-        pin_db_instance.remove_active_pin_ids(conversation_id, pin_ids_to_remove)
+    """Remove all items matching a tag across all context sources."""
+    for source in context_sources:
+        matching = source.resolve_tags([tag])
+        if matching:
+            ids_to_remove = [item["id"] for item in matching]
+            source.remove_active(conversation_id, ids_to_remove)
     return {"ok": True}
 
 

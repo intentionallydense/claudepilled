@@ -17,8 +17,6 @@ let currentMode = "chat"; // "chat" or "backrooms"
 let savedPrompts = [];
 let allTags = [];
 let activeContext = { files: [], pins: [], total_tokens: 0 };
-let boardPins = [];
-let boardFiles = [];
 let lastUsageEvent = null;
 
 // DOM elements — page-specific
@@ -29,9 +27,6 @@ const inputArea = document.getElementById("input-area");
 const messageInput = document.getElementById("message-input");
 const promptSelect = document.getElementById("prompt-select");
 const boardPanel = document.getElementById("board-panel");
-const boardContent = document.getElementById("board-content");
-const boardPinsEl = document.getElementById("board-pins");
-const boardInput = document.getElementById("board-input");
 const contextBar = document.getElementById("context-bar");
 const contextBarFiles = document.getElementById("context-bar-files");
 const contextTokenCount = document.getElementById("context-token-count");
@@ -557,10 +552,13 @@ function pinMessage(msgEl) {
     const textEl = msgEl.querySelector(".message-text");
     const text = textEl?.innerText || textEl?.textContent || "";
     if (!text.trim()) return;
-    createPin("message", text.trim(), {
-        conversation_id: chatCore.getConversationId(),
-        message_id: msgEl.dataset.msgId,
-    });
+    window.dispatchEvent(new CustomEvent("board:pin-message", {
+        detail: {
+            text: text.trim(),
+            conversationId: chatCore.getConversationId(),
+            messageId: msgEl.dataset.msgId,
+        },
+    }));
 }
 
 // ---------------------------------------------------------------------------
@@ -635,7 +633,7 @@ function renderContextBar() {
         removeBtn.textContent = "\u00d7";
         removeBtn.onpointerdown = async (e) => {
             e.preventDefault();
-            await api(`/conversations/${chatCore.getConversationId()}/context/${f.id}`, { method: "DELETE" });
+            await api(`/conversations/${chatCore.getConversationId()}/context/files/${f.id}`, { method: "DELETE" });
             await loadContext();
         };
         item.appendChild(removeBtn);
@@ -662,7 +660,7 @@ function renderContextBar() {
         removeBtn.textContent = "\u00d7";
         removeBtn.onpointerdown = async (e) => {
             e.preventDefault();
-            await api(`/conversations/${chatCore.getConversationId()}/context/pin/${p.id}`, { method: "DELETE" });
+            await api(`/conversations/${chatCore.getConversationId()}/context/pins/${p.id}`, { method: "DELETE" });
             await loadContext();
         };
         item.appendChild(removeBtn);
@@ -727,551 +725,10 @@ function hideTagAutocomplete() {
 }
 
 // ---------------------------------------------------------------------------
-// Unified board (pins + files merged by date)
+// Column 4 (managed by Column4Manager — see column4.js)
+// Moodboard panel loaded as plugin module from /plugins/moodboard/panel.js
 // ---------------------------------------------------------------------------
-async function loadBoard() {
-    try {
-        const [pins, files] = await Promise.all([
-            api("/pins"),
-            api("/files"),
-        ]);
-        boardPins = pins;
-        boardFiles = files;
-        renderBoard();
-    } catch (e) {
-        console.error("Failed to load board:", e);
-    }
-}
 
-function renderBoard() {
-    boardPinsEl.innerHTML = "";
-    const items = [];
-    for (const pin of boardPins) {
-        items.push({ _kind: "pin", _date: pin.created, ...pin });
-    }
-    for (const file of boardFiles) {
-        items.push({ _kind: "file", _date: file.uploaded_at, ...file });
-    }
-    items.sort((a, b) => (b._date || "").localeCompare(a._date || ""));
-    for (const item of items) {
-        if (item._kind === "file") {
-            boardPinsEl.appendChild(createFileCardEl(item));
-        } else {
-            boardPinsEl.appendChild(createPinEl(item));
-        }
-    }
-}
-
-function createPinEl(pin) {
-    const el = document.createElement("div");
-    el.className = "board-pin";
-    el.dataset.pinId = pin.id;
-
-    const archiveBtn = document.createElement("button");
-    archiveBtn.className = "pin-delete";
-    archiveBtn.textContent = "\u2193";
-    archiveBtn.title = "Archive";
-    archiveBtn.onclick = async (e) => {
-        e.stopPropagation();
-        await api(`/pins/${pin.id}/archive`, { method: "POST" });
-        el.remove();
-        boardPins = boardPins.filter(p => p.id !== pin.id);
-    };
-    el.appendChild(archiveBtn);
-
-    if (pin.type === "image") {
-        const img = document.createElement("img");
-        img.src = pin.content;
-        img.loading = "lazy";
-        el.appendChild(img);
-    } else if (pin.type === "link") {
-        const a = document.createElement("a");
-        a.className = "pin-link";
-        a.href = pin.content;
-        a.target = "_blank";
-        a.rel = "noopener";
-        a.textContent = pin.content;
-        el.appendChild(a);
-    } else {
-        const txt = document.createElement("div");
-        txt.className = "pin-text";
-        txt.textContent = pin.content;
-        el.appendChild(txt);
-    }
-
-    if (pin.note) {
-        const note = document.createElement("div");
-        note.className = "pin-note";
-        note.textContent = pin.note;
-        el.appendChild(note);
-    }
-
-    if (pin.tags && pin.tags.length > 0) {
-        const tagsEl = document.createElement("div");
-        tagsEl.className = "pin-tags";
-        for (const tag of pin.tags) {
-            const chip = document.createElement("span");
-            chip.className = "tag-chip";
-            chip.textContent = tag;
-            tagsEl.appendChild(chip);
-        }
-        tagsEl.onclick = (e) => {
-            e.stopPropagation();
-            startPinRetag(pin, el);
-        };
-        el.appendChild(tagsEl);
-    }
-
-    const meta = document.createElement("div");
-    meta.className = "pin-meta";
-    const src = document.createElement("span");
-    src.className = "pin-source";
-    src.textContent = pin.source;
-    meta.appendChild(src);
-    if (!pin.tags || pin.tags.length === 0) {
-        const retagLink = document.createElement("span");
-        retagLink.className = "pin-retag-link";
-        retagLink.textContent = "+tag";
-        retagLink.onclick = (e) => {
-            e.stopPropagation();
-            startPinRetag(pin, el);
-        };
-        meta.appendChild(retagLink);
-    }
-    const time = document.createElement("span");
-    const d = new Date(pin.created);
-    time.textContent = d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
-    meta.appendChild(time);
-    el.appendChild(meta);
-
-    return el;
-}
-
-function createFileCardEl(file) {
-    const el = document.createElement("div");
-    el.className = "board-pin board-file";
-    el.dataset.fileId = file.id;
-
-    const del = document.createElement("button");
-    del.className = "pin-delete";
-    del.textContent = "\u00d7";
-    del.onclick = async (e) => {
-        e.stopPropagation();
-        await api(`/files/${file.id}`, { method: "DELETE" });
-        el.remove();
-        boardFiles = boardFiles.filter(f => f.id !== file.id);
-        await loadAllTags();
-    };
-    el.appendChild(del);
-
-    const ext = file.filename.split(".").pop().toLowerCase();
-    const typeLabel = document.createElement("span");
-    typeLabel.className = "file-type-label";
-    typeLabel.textContent = ext;
-    el.appendChild(typeLabel);
-
-    const nameEl = document.createElement("div");
-    nameEl.className = "file-card-name";
-    nameEl.textContent = file.filename;
-    el.appendChild(nameEl);
-
-    if (file.tags && file.tags.length > 0) {
-        const tagsEl = document.createElement("div");
-        tagsEl.className = "pin-tags";
-        for (const tag of file.tags) {
-            const chip = document.createElement("span");
-            chip.className = "tag-chip";
-            chip.textContent = tag;
-            tagsEl.appendChild(chip);
-        }
-        tagsEl.onclick = (e) => {
-            e.stopPropagation();
-            startFileRetag(file, el);
-        };
-        el.appendChild(tagsEl);
-    }
-
-    const meta = document.createElement("div");
-    meta.className = "pin-meta";
-    const tokSpan = document.createElement("span");
-    tokSpan.textContent = formatTokens(file.token_count);
-    meta.appendChild(tokSpan);
-    if (!file.tags || file.tags.length === 0) {
-        const retagLink = document.createElement("span");
-        retagLink.className = "pin-retag-link";
-        retagLink.textContent = "+tag";
-        retagLink.onclick = (e) => {
-            e.stopPropagation();
-            startFileRetag(file, el);
-        };
-        meta.appendChild(retagLink);
-    }
-    const time = document.createElement("span");
-    const d = new Date(file.uploaded_at);
-    time.textContent = d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
-    meta.appendChild(time);
-    el.appendChild(meta);
-
-    return el;
-}
-
-function startPinRetag(pin, el) {
-    document.querySelectorAll(".retag-form").forEach(f => f.remove());
-    const form = document.createElement("div");
-    form.className = "retag-form";
-    const input = document.createElement("input");
-    input.type = "text";
-    input.value = (pin.tags || []).join(", ");
-    input.placeholder = "tags (comma-separated)";
-    form.appendChild(input);
-    const saveBtn = document.createElement("button");
-    saveBtn.textContent = "save";
-    saveBtn.onclick = async () => {
-        const newTags = input.value.split(",").map(t => t.trim()).filter(Boolean);
-        await api(`/pins/${pin.id}`, { method: "PATCH", body: JSON.stringify({ tags: newTags }) });
-        form.remove();
-        const idx = boardPins.findIndex(p => p.id === pin.id);
-        if (idx >= 0) boardPins[idx].tags = newTags;
-        renderBoard();
-        await loadAllTags();
-    };
-    form.appendChild(saveBtn);
-    el.appendChild(form);
-    input.focus();
-    input.addEventListener("keydown", (e) => {
-        if (e.key === "Enter") { e.preventDefault(); saveBtn.click(); }
-    });
-}
-
-function startFileRetag(file, el) {
-    document.querySelectorAll(".retag-form").forEach(f => f.remove());
-    const form = document.createElement("div");
-    form.className = "retag-form";
-    const input = document.createElement("input");
-    input.type = "text";
-    input.value = (file.tags || []).join(", ");
-    input.placeholder = "tags (comma-separated)";
-    form.appendChild(input);
-    const saveBtn = document.createElement("button");
-    saveBtn.textContent = "save";
-    saveBtn.onclick = async () => {
-        const newTags = input.value.split(",").map(t => t.trim()).filter(Boolean);
-        await api(`/files/${file.id}`, { method: "PATCH", body: JSON.stringify({ tags: newTags }) });
-        form.remove();
-        const idx = boardFiles.findIndex(f => f.id === file.id);
-        if (idx >= 0) boardFiles[idx].tags = newTags;
-        renderBoard();
-        await loadAllTags();
-    };
-    form.appendChild(saveBtn);
-    el.appendChild(form);
-    input.focus();
-    input.addEventListener("keydown", (e) => {
-        if (e.key === "Enter") { e.preventDefault(); saveBtn.click(); }
-    });
-}
-
-async function createPin(type, content, opts = {}) {
-    const pin = await api("/pins", {
-        method: "POST",
-        body: JSON.stringify({
-            type,
-            content,
-            source: opts.source || "sylvia",
-            note: opts.note || null,
-            conversation_id: opts.conversation_id || null,
-            message_id: opts.message_id || null,
-            tags: opts.tags || [],
-        }),
-    });
-    boardPins.unshift(pin);
-    boardPinsEl.prepend(createPinEl(pin));
-    if (opts.tags && opts.tags.length > 0) await loadAllTags();
-}
-
-// ---------------------------------------------------------------------------
-// Mobile sidebar toggle
-// ---------------------------------------------------------------------------
-function toggleSidebar(open) {
-    const show = open !== undefined ? open : !sidebar.classList.contains("open");
-    sidebar.classList.toggle("open", show);
-    sidebarBackdrop.classList.toggle("open", show);
-}
-
-if (menuBtn) menuBtn.onclick = () => toggleSidebar();
-if (sidebarBackdrop) sidebarBackdrop.onclick = () => toggleSidebar(false);
-
-// ---------------------------------------------------------------------------
-// Backrooms: new session + prompts modals
-// ---------------------------------------------------------------------------
-function showNewSessionModal() {
-    const modal = document.getElementById("new-session-modal");
-    if (!modal) return;
-    const models = chatCore?.getAvailableModels?.() || [];
-    const container = document.getElementById("participant-rows");
-    if (!container) return;
-
-    // Clear and add initial 2 rows
-    container.innerHTML = "";
-    _addParticipantRow(container, models, 0);
-    _addParticipantRow(container, models, 1);
-    _updateParticipantUI(container);
-    modal.style.display = "flex";
-}
-
-function _addParticipantRow(container, models, seatIndex) {
-    const row = document.createElement("div");
-    row.className = "participant-row";
-    row.dataset.seat = seatIndex;
-
-    const label = document.createElement("label");
-    label.className = "form-label";
-    label.textContent = seatIndex === 0 ? `seat ${seatIndex + 1} (manages pacing)` : `seat ${seatIndex + 1}`;
-
-    const rowInner = document.createElement("div");
-    rowInner.className = "participant-row-inner";
-
-    const sel = document.createElement("select");
-    sel.className = "select-minimal form-select participant-select";
-    for (const m of models) {
-        const opt = document.createElement("option");
-        opt.value = m.id;
-        opt.textContent = m.label || m.id;
-        sel.appendChild(opt);
-    }
-
-    const removeBtn = document.createElement("button");
-    removeBtn.className = "text-btn participant-remove";
-    removeBtn.textContent = "\u00d7";
-    removeBtn.onclick = () => {
-        row.remove();
-        _updateParticipantUI(container);
-    };
-
-    rowInner.appendChild(sel);
-    rowInner.appendChild(removeBtn);
-    row.appendChild(label);
-    row.appendChild(rowInner);
-    container.appendChild(row);
-}
-
-function _updateParticipantUI(container) {
-    const rows = container.querySelectorAll(".participant-row");
-    // Hide remove button if only 2 rows
-    rows.forEach(row => {
-        const btn = row.querySelector(".participant-remove");
-        if (btn) btn.style.display = rows.length <= 2 ? "none" : "";
-    });
-    // Show/hide add button (max 5)
-    const addBtn = document.getElementById("add-participant-btn");
-    if (addBtn) addBtn.style.display = rows.length >= 5 ? "none" : "";
-}
-
-async function createBackroomsSession() {
-    const container = document.getElementById("participant-rows");
-    if (!container) return;
-    const selects = container.querySelectorAll(".participant-select");
-    const participants = [];
-    for (const sel of selects) {
-        if (sel.value) participants.push(sel.value);
-    }
-    if (participants.length < 2) return;
-    try {
-        const session = await api("/backrooms/sessions", {
-            method: "POST",
-            body: JSON.stringify({ participants }),
-        });
-        document.getElementById("new-session-modal").style.display = "none";
-        await loadConversations();
-        await openConversation(session.id, "backrooms");
-    } catch (e) {
-        console.error("Failed to create backrooms session:", e);
-    }
-}
-
-// Wire up new session modal
-if (newBackroomsBtn) {
-    newBackroomsBtn.onclick = (e) => {
-        e.preventDefault();
-        showNewSessionModal();
-    };
-}
-document.getElementById("new-session-modal-close")?.addEventListener("click", () => {
-    document.getElementById("new-session-modal").style.display = "none";
-});
-document.getElementById("create-session-btn")?.addEventListener("click", createBackroomsSession);
-document.getElementById("add-participant-btn")?.addEventListener("click", () => {
-    const container = document.getElementById("participant-rows");
-    if (!container) return;
-    const models = chatCore?.getAvailableModels?.() || [];
-    const nextSeat = container.querySelectorAll(".participant-row").length;
-    if (nextSeat >= 5) return;
-    _addParticipantRow(container, models, nextSeat);
-    _updateParticipantUI(container);
-});
-
-// Wire up prompts modal
-if (modelNamesEl) {
-    modelNamesEl.onclick = () => {
-        const sessionId = chatCore?.getConversationId();
-        if (sessionId && currentMode === "backrooms") {
-            BackroomsAdapter.openPromptsModal(sessionId);
-        }
-    };
-}
-document.getElementById("br-prompts-modal-close")?.addEventListener("click", () => {
-    document.getElementById("backrooms-prompts-modal").style.display = "none";
-});
-document.getElementById("br-save-prompts-btn")?.addEventListener("click", () => {
-    const sessionId = chatCore?.getConversationId();
-    if (sessionId) BackroomsAdapter.savePrompts(sessionId);
-});
-document.getElementById("br-reset-prompts-btn")?.addEventListener("click", () => {
-    const sessionId = chatCore?.getConversationId();
-    if (sessionId) BackroomsAdapter.resetPrompts(sessionId);
-});
-
-// ---------------------------------------------------------------------------
-// Event listeners (page-specific)
-// ---------------------------------------------------------------------------
-newChatBtn.onclick = quickCreateConversation;
-
-if (compactBtn) {
-    compactBtn.onclick = () => {
-        if (!chatCore?.getConversationId() || chatCore.isCurrentlyStreaming()) return;
-        compactBtn.textContent = "compacting...";
-        compactBtn.disabled = true;
-        chatCore.sendRaw({ action: "compact" });
-    };
-}
-
-sidebarSearch.addEventListener("input", handleSidebarSearch);
-
-messageInput.addEventListener("input", handleTagAutocomplete);
-messageInput.addEventListener("blur", () => {
-    setTimeout(hideTagAutocomplete, 150);
-});
-
-promptSelect.onchange = async function () {
-    const convId = chatCore?.getConversationId();
-    if (!convId) return;
-    const id = this.value;
-    const body = id ? { prompt_id: id } : { clear_prompt: true };
-    await api(`/conversations/${convId}`, {
-        method: "PATCH",
-        body: JSON.stringify(body),
-    });
-};
-
-// Focus textarea on printable character press
-document.addEventListener("keydown", (e) => {
-    if (e.key.length !== 1 || e.ctrlKey || e.altKey || e.metaKey) return;
-    const active = document.activeElement;
-    if (active && (active.tagName === "INPUT" || active.tagName === "TEXTAREA" || active.tagName === "SELECT")) return;
-    if (messageInput.disabled || !chatCore?.getConversationId()) return;
-    messageInput.focus({ preventScroll: true });
-});
-
-// Board input auto-resize
-function autoResizeBoardInput() {
-    boardInput.style.height = "auto";
-    boardInput.style.height = Math.min(boardInput.scrollHeight, 200) + "px";
-}
-boardInput.addEventListener("input", autoResizeBoardInput);
-
-// Board text input — extract #tags before pinning
-document.getElementById("board-input-btn").onclick = () => {
-    const val = boardInput.value.trim();
-    if (!val) return;
-    const tagRegex = /#([a-zA-Z0-9-]+)/g;
-    const extractedTags = [];
-    let match;
-    while ((match = tagRegex.exec(val)) !== null) {
-        extractedTags.push(match[1].toLowerCase());
-    }
-    const text = val.replace(/#[a-zA-Z0-9-]+/g, "").trim();
-    if (!text) { boardInput.value = ""; autoResizeBoardInput(); return; }
-    const type = /^https?:\/\/\S+$/.test(text) ? "link" : "text";
-    createPin(type, text, { tags: extractedTags });
-    boardInput.value = "";
-    autoResizeBoardInput();
-};
-boardInput.addEventListener("keydown", (e) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-        e.preventDefault();
-        document.getElementById("board-input-btn").click();
-    }
-    preventTextareaScrollLeak(e, boardInput);
-});
-
-// Board drag and drop
-boardPanel.addEventListener("dragover", (e) => {
-    e.preventDefault();
-    boardPanel.classList.add("dragover");
-});
-boardPanel.addEventListener("dragleave", (e) => {
-    if (!boardPanel.contains(e.relatedTarget)) {
-        boardPanel.classList.remove("dragover");
-    }
-});
-boardPanel.addEventListener("drop", async (e) => {
-    e.preventDefault();
-    boardPanel.classList.remove("dragover");
-    if (e.dataTransfer.files.length > 0) {
-        let hasDocFiles = false;
-        for (const file of e.dataTransfer.files) {
-            const ext = file.name.split(".").pop().toLowerCase();
-            if (ext === "pdf" || ext === "md") {
-                hasDocFiles = true;
-                const form = new FormData();
-                form.append("file", file);
-                form.append("tags", "");
-                try { await fetch("/api/files/upload", { method: "POST", body: form }); }
-                catch (err) { console.error("Upload failed:", err); }
-            }
-            else if (file.type.startsWith("image/")) {
-                const reader = new FileReader();
-                reader.onload = () => { createPin("image", reader.result); };
-                reader.readAsDataURL(file);
-            }
-        }
-        if (hasDocFiles) {
-            await loadBoard();
-            await loadAllTags();
-        }
-        return;
-    }
-    const text = e.dataTransfer.getData("text/plain");
-    if (text) {
-        const type = /^https?:\/\/\S+$/.test(text) ? "link" : "text";
-        createPin(type, text);
-    }
-});
-
-// Board paste
-boardPanel.addEventListener("paste", (e) => {
-    const items = e.clipboardData?.items;
-    if (!items) return;
-    for (const item of items) {
-        if (item.type.startsWith("image/")) {
-            e.preventDefault();
-            const file = item.getAsFile();
-            const reader = new FileReader();
-            reader.onload = () => { createPin("image", reader.result); };
-            reader.readAsDataURL(file);
-            return;
-        }
-    }
-    if (document.activeElement === boardInput) return;
-    const text = e.clipboardData.getData("text/plain");
-    if (text) {
-        e.preventDefault();
-        const type = /^https?:\/\/\S+$/.test(text.trim()) ? "link" : "text";
-        createPin(type, text.trim());
-    }
-});
-
-boardPanel.setAttribute("tabindex", "-1");
 
 // ---------------------------------------------------------------------------
 // Init
@@ -1282,10 +739,21 @@ marked.setOptions({ breaks: true, gfm: true });
 chatCore = createChatCoreForChat();
 chatCore.attachListeners();
 
+// Initialize Column4Manager for the board panel
+let column4Manager = null;
+if (boardPanel) {
+    column4Manager = new Column4Manager(boardPanel, {
+        api,
+        loadAllTags,
+        loadContext,
+        getConversationId: () => chatCore?.getConversationId(),
+    });
+    column4Manager.init();
+}
+
 chatCore.loadModels().then(() => {
     loadPrompts();
     loadAllTags();
-    loadBoard();
     loadConversations().then(() => {
         const params = new URLSearchParams(window.location.search);
         const openId = params.get("c");

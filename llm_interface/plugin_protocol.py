@@ -46,6 +46,7 @@ class ContextSource:
     set_active: Callable[[str, list[str]], None]  # (conversation_id, ids)
     remove_active: Callable[[str, list[str]], None]  # (conversation_id, ids)
     format_block: Callable[[list[dict]], str]  # items -> XML string for system prompt
+    build_preview: Callable[[dict], dict]  # item -> context bar preview dict
 
 
 @dataclass
