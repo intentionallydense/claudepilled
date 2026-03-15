@@ -467,7 +467,8 @@ function createChatCore(config) {
             for (const m of group) {
                 const opt = document.createElement("option");
                 opt.value = m.id;
-                opt.textContent = m.name;
+                const cost = `$${m.input_cost}/$${m.output_cost}`;
+                opt.textContent = `${m.name}  (${cost})`;
                 if (m.id === selectedModel) opt.selected = true;
                 optgroup.appendChild(opt);
             }

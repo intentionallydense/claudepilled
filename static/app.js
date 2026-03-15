@@ -776,7 +776,9 @@ function _addParticipantRow(container, models, seatIndex) {
     for (const m of models) {
         const opt = document.createElement("option");
         opt.value = m.id;
-        opt.textContent = m.label || m.id;
+        const label = m.label || m.name || m.id;
+        const cost = (m.input_cost != null) ? `  ($${m.input_cost}/$${m.output_cost})` : "";
+        opt.textContent = label + cost;
         sel.appendChild(opt);
     }
 
