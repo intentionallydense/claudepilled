@@ -730,6 +730,106 @@ function hideTagAutocomplete() {
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
+// Mobile sidebar toggle
+// ---------------------------------------------------------------------------
+function toggleSidebar(open) {
+    const show = open !== undefined ? open : !sidebar.classList.contains("open");
+    sidebar.classList.toggle("open", show);
+    sidebarBackdrop.classList.toggle("open", show);
+}
+
+if (menuBtn) menuBtn.onclick = () => toggleSidebar();
+if (sidebarBackdrop) sidebarBackdrop.onclick = () => toggleSidebar(false);
+
+// ---------------------------------------------------------------------------
+// Backrooms: new session + prompts modals
+// ---------------------------------------------------------------------------
+function showNewSessionModal() {
+    const modal = document.getElementById("new-session-modal");
+    if (!modal) return;
+    const models = chatCore?.getAvailableModels?.() || [];
+    const container = document.getElementById("participant-rows");
+    if (!container) return;
+
+    // Clear and add initial 2 rows
+    container.innerHTML = "";
+    _addParticipantRow(container, models, 0);
+    _addParticipantRow(container, models, 1);
+    _updateParticipantUI(container);
+    modal.style.display = "flex";
+}
+
+function _addParticipantRow(container, models, seatIndex) {
+    const row = document.createElement("div");
+    row.className = "participant-row";
+    row.dataset.seat = seatIndex;
+
+    const label = document.createElement("label");
+    label.className = "form-label";
+    label.textContent = seatIndex === 0 ? `seat ${seatIndex + 1} (manages pacing)` : `seat ${seatIndex + 1}`;
+
+    const rowInner = document.createElement("div");
+    rowInner.className = "participant-row-inner";
+
+    const sel = document.createElement("select");
+    sel.className = "select-minimal form-select participant-select";
+    for (const m of models) {
+        const opt = document.createElement("option");
+        opt.value = m.id;
+        opt.textContent = m.label || m.id;
+        sel.appendChild(opt);
+    }
+
+    const removeBtn = document.createElement("button");
+    removeBtn.className = "text-btn participant-remove";
+    removeBtn.textContent = "\u00d7";
+    removeBtn.onclick = () => {
+        row.remove();
+        _updateParticipantUI(container);
+    };
+
+    rowInner.appendChild(sel);
+    rowInner.appendChild(removeBtn);
+    row.appendChild(label);
+    row.appendChild(rowInner);
+    container.appendChild(row);
+}
+
+function _updateParticipantUI(container) {
+    const rows = container.querySelectorAll(".participant-row");
+    // Hide remove button if only 2 rows
+    rows.forEach(row => {
+        const btn = row.querySelector(".participant-remove");
+        if (btn) btn.style.display = rows.length <= 2 ? "none" : "";
+    });
+    // Show/hide add button (max 5)
+    const addBtn = document.getElementById("add-participant-btn");
+    if (addBtn) addBtn.style.display = rows.length >= 5 ? "none" : "";
+}
+
+async function createBackroomsSession() {
+    const container = document.getElementById("participant-rows");
+    if (!container) return;
+    const selects = container.querySelectorAll(".participant-select");
+    const participants = [];
+    for (const sel of selects) {
+        if (sel.value) participants.push(sel.value);
+    }
+    if (participants.length < 2) return;
+    try {
+        const session = await api("/backrooms/sessions", {
+            method: "POST",
+            body: JSON.stringify({ participants }),
+        });
+        document.getElementById("new-session-modal").style.display = "none";
+        await loadConversations();
+        await openConversation(session.id, "backrooms");
+    } catch (e) {
+        console.error("Failed to create backrooms session:", e);
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Wire up backrooms modals
 // ---------------------------------------------------------------------------
 if (newBackroomsBtn) {
