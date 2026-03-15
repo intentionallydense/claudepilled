@@ -86,12 +86,13 @@ class ConversationManager:
 
         Anthropic providers get Anthropic-format tool definitions. OpenAI-
         compatible providers get OpenAI function-calling format. Web search
-        works for Anthropic (native) and OpenRouter (:online variant).
+        is Anthropic-only (tool-based, model decides when to search).
+        OpenRouter :online was disabled — it forces a search on every request.
         Prompt caching is Anthropic-only.
         """
         provider = get_provider_for_model(model)
         is_anthropic = provider == "anthropic"
-        has_web_search = provider in ("anthropic", "openrouter")
+        has_web_search = is_anthropic
         client = get_client_for_model(model, self.client)
         raw_tools = self.tools.get_definitions() or None
         if raw_tools and not is_anthropic:

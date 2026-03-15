@@ -540,10 +540,10 @@ class BackroomsOrchestrator:
             # Get temperature override if set by !temperature command
             temperature = session_state.temperatures.get(speaker)
 
-            # Anthropic + OpenRouter models get native web search;
+            # Anthropic models get native tool-based web search;
             # others fall back to !search command proxy
             provider = get_provider_for_model(model_id)
-            has_web_search = provider in ("anthropic", "openrouter")
+            has_web_search = provider == "anthropic"
             # Wrap system prompt in cached block for Anthropic providers
             system_for_api = system_prompt
             if provider == "anthropic" and system_prompt:
