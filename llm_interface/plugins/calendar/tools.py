@@ -116,8 +116,9 @@ def register_calendar_tools(
     @registry.tool(
         description=(
             "Create a Google Calendar event. Requires summary (title), "
-            "start time, and end time as ISO datetime strings. Optionally "
-            "accepts description and location."
+            "start time, and end time as ISO datetime strings with timezone "
+            "offset (e.g. 2026-03-15T14:00:00+00:00). Optionally accepts "
+            "description and location."
         )
     )
     def calendar_create(
