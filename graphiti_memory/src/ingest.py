@@ -14,7 +14,6 @@ from datetime import datetime
 from pathlib import Path
 
 import click
-from dotenv import load_dotenv
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, MofNCompleteColumn
 
@@ -147,7 +146,6 @@ async def _run_ingestion(
 @click.option("--config", "config_path", default="config.yaml", help="Path to config file")
 def main(export_path: str, resume: bool, after: str | None, dry_run: bool, config_path: str):
     """Ingest Claude.ai conversation exports into the Graphiti knowledge graph."""
-    load_dotenv()
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 
     config = load_config(config_path)

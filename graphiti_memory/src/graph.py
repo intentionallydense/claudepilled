@@ -10,9 +10,15 @@ Set extraction_model to a glm-* model to use Z.AI directly.
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 import yaml
+from dotenv import load_dotenv
 from graphiti_core import Graphiti
+
+# Load .env from the project root (parent of graphiti_memory/)
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+load_dotenv(_PROJECT_ROOT / ".env")
 
 
 _DEFAULT_CONFIG = {

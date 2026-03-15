@@ -9,7 +9,6 @@ import asyncio
 import logging
 
 import click
-from dotenv import load_dotenv
 from rich.console import Console
 from rich.table import Table
 
@@ -167,7 +166,6 @@ async def _show_timeline(topic: str, config: dict) -> None:
 @click.group()
 def main():
     """Inspect the Graphiti knowledge graph."""
-    load_dotenv()
     logging.basicConfig(level=logging.WARNING)
 
 

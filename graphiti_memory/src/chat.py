@@ -14,7 +14,6 @@ from datetime import datetime
 
 import anthropic
 import click
-from dotenv import load_dotenv
 from rich.console import Console
 from rich.markdown import Markdown
 
@@ -131,7 +130,6 @@ async def _chat_loop(
 @click.option("--config", "config_path", default="config.yaml", help="Path to config file")
 def main(model: str | None, no_memory: bool, show_context: bool, config_path: str):
     """Chat with Claude, enriched by your personal knowledge graph."""
-    load_dotenv()
     logging.basicConfig(level=logging.WARNING)
 
     config = load_config(config_path)
