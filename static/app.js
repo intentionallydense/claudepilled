@@ -729,6 +729,89 @@ function hideTagAutocomplete() {
 // Moodboard panel loaded as plugin module from /plugins/moodboard/panel.js
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Wire up backrooms modals
+// ---------------------------------------------------------------------------
+if (newBackroomsBtn) {
+    newBackroomsBtn.onclick = (e) => {
+        e.preventDefault();
+        showNewSessionModal();
+    };
+}
+document.getElementById("new-session-modal-close")?.addEventListener("click", () => {
+    document.getElementById("new-session-modal").style.display = "none";
+});
+document.getElementById("create-session-btn")?.addEventListener("click", createBackroomsSession);
+document.getElementById("add-participant-btn")?.addEventListener("click", () => {
+    const container = document.getElementById("participant-rows");
+    if (!container) return;
+    const models = chatCore?.getAvailableModels?.() || [];
+    const nextSeat = container.querySelectorAll(".participant-row").length;
+    if (nextSeat >= 5) return;
+    _addParticipantRow(container, models, nextSeat);
+    _updateParticipantUI(container);
+});
+
+if (modelNamesEl) {
+    modelNamesEl.onclick = () => {
+        const sessionId = chatCore?.getConversationId();
+        if (sessionId && currentMode === "backrooms") {
+            BackroomsAdapter.openPromptsModal(sessionId);
+        }
+    };
+}
+document.getElementById("br-prompts-modal-close")?.addEventListener("click", () => {
+    document.getElementById("backrooms-prompts-modal").style.display = "none";
+});
+document.getElementById("br-save-prompts-btn")?.addEventListener("click", () => {
+    const sessionId = chatCore?.getConversationId();
+    if (sessionId) BackroomsAdapter.savePrompts(sessionId);
+});
+document.getElementById("br-reset-prompts-btn")?.addEventListener("click", () => {
+    const sessionId = chatCore?.getConversationId();
+    if (sessionId) BackroomsAdapter.resetPrompts(sessionId);
+});
+
+// ---------------------------------------------------------------------------
+// Event listeners (page-specific)
+// ---------------------------------------------------------------------------
+newChatBtn.onclick = quickCreateConversation;
+
+if (compactBtn) {
+    compactBtn.onclick = () => {
+        if (!chatCore?.getConversationId() || chatCore.isCurrentlyStreaming()) return;
+        compactBtn.textContent = "compacting...";
+        compactBtn.disabled = true;
+        chatCore.sendRaw({ action: "compact" });
+    };
+}
+
+sidebarSearch.addEventListener("input", handleSidebarSearch);
+
+messageInput.addEventListener("input", handleTagAutocomplete);
+messageInput.addEventListener("blur", () => {
+    setTimeout(hideTagAutocomplete, 150);
+});
+
+promptSelect.onchange = async function () {
+    const convId = chatCore?.getConversationId();
+    if (!convId) return;
+    const id = this.value;
+    const body = id ? { prompt_id: id } : { clear_prompt: true };
+    await api(`/conversations/${convId}`, {
+        method: "PATCH",
+        body: JSON.stringify(body),
+    });
+};
+
+// Focus textarea on printable character press
+document.addEventListener("keydown", (e) => {
+    if (e.key.length !== 1 || e.ctrlKey || e.altKey || e.metaKey) return;
+    const active = document.activeElement;
+    if (active && (active.tagName === "INPUT" || active.tagName === "TEXTAREA" || active.tagName === "SELECT")) return;
+    if (messageInput.disabled || !chatCore?.getConversationId()) return;
+    messageInput.focus({ preventScroll: true });
+});
 
 // ---------------------------------------------------------------------------
 // Init
