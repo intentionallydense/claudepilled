@@ -3,7 +3,7 @@
 // chat functionality (streaming, tree, rendering). This file handles
 // page-specific concerns: sidebar, moodboard, files, prompts, context bar.
 //
-// Supports two modes: "chat" (normal Claude conversations) and "backrooms"
+// Supports two modes: "chat" (normal conversations) and "backrooms"
 // (two-model sessions). Mode switching destroys/recreates the chatCore
 // instance with appropriate config. BackroomsAdapter (backrooms-adapter.js)
 // provides config overrides for backrooms mode.

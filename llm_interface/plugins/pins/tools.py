@@ -34,7 +34,7 @@ def register_pin_tools(registry: ToolRegistry, pin_db: PinDatabase) -> None:
         kwargs = {
             "type": type,
             "content": content,
-            "source": "claude",
+            "source": "assistant",
         }
         if note:
             kwargs["note"] = note
