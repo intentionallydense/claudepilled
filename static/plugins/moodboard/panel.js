@@ -31,9 +31,12 @@ export function render(container, ctx) {
     _container = container;
     _ctx = ctx;
 
-    // Build DOM
+    // Build DOM — board-content (scrollable) + board-input-area (fixed bottom)
+    // as siblings inside the column4-panel-area flex container
     container.innerHTML = `
-        <div class="board-pins" id="moodboard-pins"></div>
+        <div class="board-content">
+            <div class="board-pins"></div>
+        </div>
         <div class="board-input-area">
             <textarea class="board-input" placeholder="pin something... #tag" rows="1"></textarea>
             <div class="board-input-actions">

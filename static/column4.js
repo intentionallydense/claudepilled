@@ -24,7 +24,9 @@ class Column4Manager {
     }
 
     async init() {
-        // Build internal structure
+        // Build internal structure: tab bar + panel area
+        // Panel area is a flex-growing wrapper — the panel module creates
+        // its own internal layout (e.g., scrollable content + fixed input).
         this._container.innerHTML = "";
 
         this._tabBar = document.createElement("div");
@@ -32,7 +34,7 @@ class Column4Manager {
         this._container.appendChild(this._tabBar);
 
         this._contentEl = document.createElement("div");
-        this._contentEl.className = "board-content";
+        this._contentEl.className = "column4-panel-area";
         this._container.appendChild(this._contentEl);
 
         // Fetch panel declarations
