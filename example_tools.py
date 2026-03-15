@@ -2,7 +2,7 @@
 
 from datetime import datetime, timezone
 
-from claude_wrapper.tools import ToolRegistry
+from llm_interface.tools import ToolRegistry
 
 registry = ToolRegistry()
 

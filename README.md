@@ -1,29 +1,32 @@
-# Claude Wrapper
+# LLM Interface
 
-A lightweight web UI and API wrapper around the Anthropic Claude API with tool use, conversation management, and a "couch" therapy-style mode.
+A multi-provider LLM web interface with streaming chat, tool use, conversation management, and an N-model "backrooms" conversation mode.
+
+Supports Anthropic Claude, OpenAI GPT, Google Gemini, DeepSeek, Qwen, Kimi, and any model via OpenRouter.
 
 ## Setup
 
 ```bash
 pip install -e .
-cp .env.example .env        # add your ANTHROPIC_API_KEY
-claude-wrapper               # starts the server at http://localhost:8000
+cp .env.example .env        # add your API keys
+llm-interface               # starts the server at http://localhost:8000
 ```
 
 ## Features
 
-- **Chat** — streaming conversations with Claude, stored in a local SQLite database
-- **Tasks** — urgency-scored task list with brain-dump interview workflow, Claude can create/manage tasks via tool calls
-- **The Couch** — a two-model chatroom conversation mode
+- **Chat** — streaming conversations with any supported LLM, stored in a local SQLite database
+- **Backrooms** — N-model (2-5) chatroom with round-robin turns, role-flipping, and AI self-modification commands
+- **Tasks** — urgency-scored task list with brain-dump interview workflow, LLM can create/manage tasks via tool calls
+- **Briefing** — daily briefing assembled from RSS feeds, reading lists, and calendar
 - **Settings & Prompts** — switch models and edit system prompts from the UI
-- **Tool Use** — register custom tools that Claude can call during a conversation
+- **Tool Use** — register custom tools that models can call during a conversation
 
 ## Adding Custom Tools
 
 See `example_tools.py` for a working example. Define tools with the `@registry.tool` decorator:
 
 ```python
-from claude_wrapper.tools import ToolRegistry
+from llm_interface.tools import ToolRegistry
 
 registry = ToolRegistry()
 

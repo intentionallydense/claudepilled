@@ -3,9 +3,9 @@ requires = ["setuptools>=68.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "claude-wrapper"
+name = "llm-interface"
 version = "0.1.0"
-description = "A wrapper around the Anthropic Claude API with tool use, conversation management, and a web UI."
+description = "A multi-provider LLM web interface with tool use, conversation management, and streaming chat."
 requires-python = ">=3.10"
 dependencies = [
     "anthropic>=0.40.0",
@@ -30,10 +30,11 @@ dev = [
 ]
 
 
-[tool.setuptools]
-packages = ["claude_wrapper"]
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["llm_interface*"]
 
 [project.scripts]
-claude-wrapper = "claude_wrapper.server:main"
-claude-wrapper-briefing = "claude_wrapper.briefing_assembly:cli_main"
-claude-wrapper-email = "claude_wrapper.email_ingestion:cli_main"
+llm-interface = "llm_interface.server:main"
+llm-interface-briefing = "llm_interface.briefing_assembly:cli_main"
+llm-interface-email = "llm_interface.email_ingestion:cli_main"

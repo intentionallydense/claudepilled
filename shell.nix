@@ -24,7 +24,7 @@ pkgs.mkShell {
 
   shellHook = ''
     export PYTHONPATH="${toString ./.}:$PYTHONPATH"
-    echo "claude-wrapper dev shell ready"
-    echo "Run: python -m claude_wrapper.server"
+    echo "llm-interface dev shell ready"
+    echo "Run: python -m llm_interface.server"
   '';
 }

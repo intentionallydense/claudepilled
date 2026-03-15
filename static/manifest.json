@@ -1,6 +1,6 @@
 {
-  "name": "claudepilled",
-  "short_name": "claudepilled",
+  "name": "LLM Interface",
+  "short_name": "LLM Interface",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#ffffff",

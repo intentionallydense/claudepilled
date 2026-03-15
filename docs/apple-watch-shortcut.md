@@ -1,12 +1,12 @@
 # Apple Watch Voice Chat Shortcut
 
-Voice-based interaction with claude-wrapper from Apple Watch via Shortcuts app.
+Voice-based interaction with llm-interface from Apple Watch via Shortcuts app.
 The watch uses built-in speech-to-text, sends transcribed text to the server
 over Tailscale, and displays the response as text on the watch screen.
 
 ## Prerequisites
 
-- claude-wrapper running on a machine reachable via Tailscale
+- llm-interface running on a machine reachable via Tailscale
 - Server URL: `http://100.103.65.102:8000` (adjust to your Tailscale IP)
 
 ## API Endpoints Used
