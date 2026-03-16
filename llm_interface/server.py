@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import importlib.util
 import json
+import logging
 import os
 import sys
 import uuid
@@ -384,6 +385,33 @@ async def _run_stream_to_completion(
         task_dict.pop(key, None)
 
 
+async def _inject_memory_context(conversation_id: str, user_text: str) -> None:
+    """Fetch relevant context from the knowledge graph and inject it into
+    the conversation manager's per-turn memory slot. Fails silently —
+    memory is a nice-to-have, not a blocker."""
+    if not manager:
+        return
+    # Check if auto-inject is enabled (default: off until user turns it on)
+    if manager.db.get_setting("memory_auto_inject") != "true":
+        return
+    try:
+        import sys
+        _graphiti_dir = str(Path(__file__).resolve().parent.parent / "graphiti_memory")
+        if _graphiti_dir not in sys.path:
+            sys.path.insert(0, _graphiti_dir)
+        from src.retrieve import retrieve_context
+        from src.graph import load_config
+
+        config = load_config(str(Path(_graphiti_dir) / "config.yaml"))
+        context = await retrieve_context(user_text, config=config)
+        if context:
+            manager._memory_context[conversation_id] = context
+            return context
+    except Exception as exc:
+        logging.getLogger(__name__).warning("Memory auto-inject failed: %s", exc)
+    return None
+
+
 @app.websocket("/api/chat/{conversation_id}")
 async def websocket_chat(ws: WebSocket, conversation_id: str):
     await ws.accept()
@@ -413,6 +441,15 @@ async def websocket_chat(ws: WebSocket, conversation_id: str):
                     "type": StreamEventType.MESSAGE_DONE.value,
                 }))
                 continue
+
+            # Auto-inject memory context from knowledge graph if enabled
+            if action == "chat" and user_text:
+                memory_ctx = await _inject_memory_context(conversation_id, user_text)
+                if memory_ctx:
+                    await ws.send_text(json.dumps({
+                        "type": "memory_context",
+                        "context": memory_ctx,
+                    }))
 
             if action == "compact":
                 try:
@@ -487,7 +524,7 @@ async def get_settings():
 
 @app.put("/api/settings")
 async def put_settings(body: dict):
-    allowed = {"universal_prompt", "universal_prompt_id", "default_model", "backrooms_seat_1_suffix", "backrooms_seat_2_suffix", "backrooms_seat_3_suffix", "backrooms_seat_4_suffix", "backrooms_seat_5_suffix", "backrooms_seat_1_suffix_id", "backrooms_seat_2_suffix_id", "backrooms_seat_3_suffix_id", "backrooms_seat_4_suffix_id", "backrooms_seat_5_suffix_id", "email_ingestion_prompt_id"}
+    allowed = {"universal_prompt", "universal_prompt_id", "default_model", "backrooms_seat_1_suffix", "backrooms_seat_2_suffix", "backrooms_seat_3_suffix", "backrooms_seat_4_suffix", "backrooms_seat_5_suffix", "backrooms_seat_1_suffix_id", "backrooms_seat_2_suffix_id", "backrooms_seat_3_suffix_id", "backrooms_seat_4_suffix_id", "backrooms_seat_5_suffix_id", "email_ingestion_prompt_id", "memory_auto_inject"}
     for key, value in body.items():
         if key in allowed:
             manager.db.set_setting(key, value)

@@ -21,8 +21,8 @@
 /* Prompts library                                                     */
 /* ------------------------------------------------------------------ */
 .prompts-section {
-    margin-top: 1.5rem;
-    padding-top: 1rem;
+    margin-top: 0.75rem;
+    padding-top: 0.5rem;
     border-top: 1px solid #eee;
 }
 
@@ -30,11 +30,11 @@
     font-size: 0.85rem;
     font-weight: 600;
     color: #111;
-    margin-bottom: 0.75rem;
+    margin-bottom: 0.35rem;
 }
 
 .prompts-list {
-    margin-bottom: 0.5rem;
+    margin-bottom: 0.25rem;
 }
 
 .prompts-empty {
@@ -74,7 +74,7 @@
 }
 
 .prompts-add {
-    padding-top: 0.5rem;
+    padding-top: 0.15rem;
 }
 
 .prompt-edit-actions {
@@ -101,8 +101,8 @@
     font-family: var(--font-sans);
     font-size: 0.7rem;
     color: #888;
-    margin-top: 1.5rem;
-    margin-bottom: 0.75rem;
+    margin-top: 0;
+    margin-bottom: 0.5rem;
     line-height: 1.5;
 }
 

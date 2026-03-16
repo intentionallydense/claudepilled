@@ -87,8 +87,10 @@ class ToolRegistry:
         for fn in self._refreshers:
             fn()
 
-    def execute(self, tool_name: str, tool_input: dict[str, Any]) -> str:
-        """Execute a registered tool and return the result as a string."""
+    async def execute(self, tool_name: str, tool_input: dict[str, Any]) -> str:
+        """Execute a registered tool and return the result as a string.
+        Supports both sync and async tool callables."""
+        import asyncio
         tool = self._tools.get(tool_name)
         if tool is None:
             return json.dumps({"error": f"Unknown tool: {tool_name}"})
@@ -96,6 +98,8 @@ class ToolRegistry:
             return json.dumps({"error": f"Tool {tool_name} has no callable"})
         try:
             result = tool.callable(**tool_input)
+            if asyncio.iscoroutine(result):
+                result = await result
             if isinstance(result, str):
                 return result
             return json.dumps(result, default=str)

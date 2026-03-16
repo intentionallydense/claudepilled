@@ -10,6 +10,7 @@ Used by: server.py (creates the singleton ConversationManager at startup)
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -80,6 +81,9 @@ class ConversationManager:
         self.db = db or Database()
         self.context_sources = context_sources or []
         self._openrouter_client = None  # lazy-init AsyncOpenAI for system tasks
+        # Per-turn memory context injected by server.py before stream_chat.
+        # Keyed by conversation_id, cleared after the system prompt is built.
+        self._memory_context: dict[str, str] = {}
 
     def _get_client_and_tools(self, model: str):
         """Return (client, tool_defs, is_anthropic) for the given model.
@@ -201,7 +205,9 @@ class ConversationManager:
             if not tool_blocks:
                 break
 
-            tool_results = self._execute_tool_blocks(tool_blocks)
+            tool_results = asyncio.get_event_loop().run_until_complete(
+                self._execute_tool_blocks(tool_blocks)
+            )
             tool_msg = Message(role="user", content=tool_results, parent_id=assistant_msg.id)
             conv.messages.append(tool_msg)
             self.db.save_message(conversation_id, tool_msg)
@@ -391,7 +397,7 @@ class ConversationManager:
                 b for b in conv.messages[-1].content
                 if isinstance(b, ContentBlock) and b.type == "tool_use"
             ]
-            tool_results = self._execute_tool_blocks(tool_blocks)
+            tool_results = await self._execute_tool_blocks(tool_blocks)
             for result_block in tool_results:
                 yield StreamEvent(
                     type=StreamEventType.TOOL_RESULT,
@@ -535,7 +541,7 @@ class ConversationManager:
                 b for b in conv.messages[-1].content
                 if isinstance(b, ContentBlock) and b.type == "tool_use"
             ]
-            tool_results = self._execute_tool_blocks(tool_blocks)
+            tool_results = await self._execute_tool_blocks(tool_blocks)
             for result_block in tool_results:
                 yield StreamEvent(
                     type=StreamEventType.TOOL_RESULT,
@@ -753,6 +759,20 @@ class ConversationManager:
         if files_block:
             layers.append(files_block)
 
+        # Memory layer — auto-injected context from the knowledge graph.
+        # Set by server.py before stream_chat, consumed once then cleared
+        # so stale context doesn't linger across turns.
+        memory_ctx = self._memory_context.pop(conv.id, None)
+        if memory_ctx:
+            layers.append(
+                "<memory_context>\n"
+                "The following is relevant context retrieved from the user's "
+                "past conversations. Use it naturally — don't announce that "
+                "you're remembering things unless relevant.\n\n"
+                f"{memory_ctx}\n"
+                "</memory_context>"
+            )
+
         # Substitute {self_label} with the model's display name so chat
         # prompts can reference the model naturally (backrooms does this
         # separately via _substitute_variables).
@@ -805,10 +825,10 @@ class ConversationManager:
             return content
         return [ContentBlock(**block) for block in content]
 
-    def _execute_tool_blocks(self, tool_blocks: list[ContentBlock]) -> list[ContentBlock]:
+    async def _execute_tool_blocks(self, tool_blocks: list[ContentBlock]) -> list[ContentBlock]:
         results: list[ContentBlock] = []
         for block in tool_blocks:
-            result_text = self.tools.execute(block.name, block.input or {})
+            result_text = await self.tools.execute(block.name, block.input or {})
             results.append(ContentBlock(
                 type="tool_result",
                 tool_use_id=block.id,

@@ -53,6 +53,7 @@ LLM Interface is a personal web UI supporting multiple LLM providers — Anthrop
 | `calendar/` | Google Calendar integration — OAuth2 flow, event cache, CRUD, LLM tools. Contains `db.py` (CalendarDatabase cache layer), `routes.py` (REST API — OAuth, events, create), `tools.py` (LLM tool definitions). Provides `calendar_db` service |
 | `briefing/` | Daily briefing assembly — RSS feeds, reading lists, Anki stats, task triage. Consumes `task_db`, provides `briefing_db`. Contains `db.py` (BriefingDatabase — briefings, reading_progress, shown_posts tables), `feeds.py` (RSS fetching + Wikipedia API), `sequential.py` (reading list pointer management), `anki.py` (AnkiConnect proxy), `assembly.py` (orchestrates data gathering + LLM prompt + DB storage, CLI entry point), `routes.py` (3 sub-routers: briefing, reading-progress, anki). Combined router mounted at `/api` |
 | `email/` | Email ingestion — IMAP fetch, LLM parsing (GLM5/Haiku), task creation. Consumes `task_db`, provides `email_db`. Contains `db.py` (EmailDatabase CRUD), `routes.py` (REST API), `ingestion.py` (IMAP + LLM pipeline + CLI entry point) |
+| `memory/` | Graphiti knowledge graph integration — exposes `memory_search` (query past conversations) and `memory_forget` (remove episodes) as async LLM tools. Imports from the sibling `graphiti_memory` package |
 
 ### Frontend (`static/`)
 
@@ -97,6 +98,25 @@ LLM Interface is a personal web UI supporting multiple LLM providers — Anthrop
 | `pyproject.toml` | Package config, dependencies, entry points (`llm-interface`, `llm-interface-briefing`, `llm-interface-email`) |
 | `example_tools.py` | Sample tool definitions (get_current_time, calculate) |
 | `.env` / `.env.example` | API key configuration |
+
+### Graphiti Memory (`graphiti_memory/`)
+
+| File / Dir | Purpose |
+|------------|---------|
+| `config.yaml` | Model, Neo4j, Z.AI, and ingestion settings |
+| `docker-compose.yaml` | Neo4j 5 Community (bolt:7687, browser:7474) with APOC |
+| `pyproject.toml` | Package config — `memory-ingest`, `memory-sync`, `memory-chat`, `memory-inspect` CLI entry points |
+| `src/parser.py` | Parses Claude.ai JSON exports into `Episode` dataclasses (human+assistant turn pairs) |
+| `src/ingest.py` | CLI pipeline — feeds episodes to Graphiti with checkpointing and resume support |
+| `src/sync.py` | Live DB sync — reads conversations from `~/.llm-interface/data.db` and syncs new/updated ones to Neo4j with per-conversation checkpointing |
+| `src/graph.py` | Graphiti client factory — routes to Z.AI `OpenAIGenericClient` for GLM models, Anthropic otherwise |
+| `src/chat.py` | Memory-augmented chat CLI |
+| `src/retrieve.py` | Graph search / retrieval helpers |
+| `src/inspect.py` | Graph inspection CLI |
+| `src/formatting.py` | Output formatting utilities |
+| `data/exports/` | Claude.ai export files (`conversations.json`, `users.json`, `projects.json`, zip archives). Gitignored |
+| `data/checkpoints/` | Ingestion progress checkpoints. Gitignored |
+| `data/sync_state.json` | Tracks which conversations have been synced and their message counts. Gitignored |
 
 ## Key Decisions
 

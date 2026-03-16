@@ -36,6 +36,12 @@
                     <option value="">(none)</option>
                 </select>
 
+                <label class="form-label" style="margin-top: 1rem;">
+                    <input type="checkbox" id="memory-auto-inject" />
+                    auto-inject memory context
+                    <span style="opacity: 0.6; font-size: 0.85em; display: block;">searches your knowledge graph before each message and injects relevant context into the system prompt</span>
+                </label>
+
                 <div class="form-actions">
                     <button type="submit" class="btn-dark">save</button>
                     <span id="save-status" class="save-status"></span>

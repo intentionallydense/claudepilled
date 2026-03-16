@@ -1,7 +1,7 @@
 """Ingestion pipeline — parse Claude.ai exports and add episodes to the Graphiti graph.
 
-CLI entry point. Processes episodes chronologically with checkpointing
-so ingestion can be resumed after interruption.
+CLI entry point. Processes episodes sequentially (Z.AI rate limits are too strict
+for bulk mode) with conversation-level checkpointing so ingestion can be resumed.
 """
 
 from __future__ import annotations
@@ -9,11 +9,12 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import time
+from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
 
 import click
+from graphiti_core.nodes import EpisodeType
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, MofNCompleteColumn
 
@@ -26,24 +27,32 @@ console = Console()
 CHECKPOINT_DIR = Path(__file__).resolve().parent.parent / "data" / "checkpoints"
 
 
-def _load_checkpoint(export_path: str) -> int:
-    """Return the index of the last successfully ingested episode, or -1."""
+def _load_checkpoint(export_path: str) -> set[str]:
+    """Return the set of conversation IDs already ingested."""
     cp_file = CHECKPOINT_DIR / f"{Path(export_path).stem}.json"
     if cp_file.exists():
         data = json.loads(cp_file.read_text())
-        return data.get("last_index", -1)
-    return -1
+        return set(data.get("completed_conversations", []))
+    return set()
 
 
-def _save_checkpoint(export_path: str, index: int, stats: dict) -> None:
+def _save_checkpoint(export_path: str, completed: set[str], stats: dict) -> None:
     """Save ingestion progress."""
     CHECKPOINT_DIR.mkdir(parents=True, exist_ok=True)
     cp_file = CHECKPOINT_DIR / f"{Path(export_path).stem}.json"
     cp_file.write_text(json.dumps({
-        "last_index": index,
+        "completed_conversations": sorted(completed),
         "timestamp": datetime.utcnow().isoformat(),
         "stats": stats,
     }, indent=2))
+
+
+def _group_by_conversation(episodes) -> dict[str, list]:
+    """Group episodes by conversation_id, preserving chronological order."""
+    groups = defaultdict(list)
+    for ep in episodes:
+        groups[ep.conversation_id].append(ep)
+    return dict(groups)
 
 
 async def _run_ingestion(
@@ -53,7 +62,7 @@ async def _run_ingestion(
     dry_run: bool = False,
     config: dict | None = None,
 ) -> dict:
-    """Core ingestion logic. Returns stats dict."""
+    """Core ingestion logic — sequential add_episode with conversation checkpointing."""
     if config is None:
         config = load_config()
 
@@ -62,28 +71,39 @@ async def _run_ingestion(
         console.print("[yellow]No episodes to ingest.[/yellow]")
         return {"total": 0, "ingested": 0, "skipped": 0, "errors": 0}
 
-    start_index = 0
+    conv_groups = _group_by_conversation(episodes)
+
+    completed_convs: set[str] = set()
     if resume:
-        last = _load_checkpoint(export_path)
-        if last >= 0:
-            start_index = last + 1
-            console.print(f"[cyan]Resuming from episode {start_index}/{len(episodes)}[/cyan]")
+        completed_convs = _load_checkpoint(export_path)
+        if completed_convs:
+            console.print(f"[cyan]Resuming: {len(completed_convs)}/{len(conv_groups)} conversations already done[/cyan]")
+
+    remaining = {cid: eps for cid, eps in conv_groups.items() if cid not in completed_convs}
+    remaining_episodes = sum(len(eps) for eps in remaining.values())
 
     if dry_run:
-        console.print(f"[cyan]Dry run: {len(episodes)} episodes parsed, {start_index} would be skipped[/cyan]")
-        for i, ep in enumerate(episodes[:5]):
-            console.print(f"  [{i}] {ep.conversation_title[:50]} — {ep.timestamp[:10]} — {len(ep.content)} chars")
-        if len(episodes) > 5:
-            console.print(f"  ... and {len(episodes) - 5} more")
-        return {"total": len(episodes), "ingested": 0, "skipped": start_index, "errors": 0, "dry_run": True}
+        console.print(f"[cyan]Dry run: {len(episodes)} episodes in {len(conv_groups)} conversations[/cyan]")
+        console.print(f"  {len(completed_convs)} done, {len(remaining)} remaining ({remaining_episodes} episodes)")
+        for cid, eps in list(remaining.items())[:5]:
+            title = eps[0].conversation_title[:50]
+            console.print(f"  {title} — {len(eps)} episodes — {eps[0].timestamp[:10]}")
+        if len(remaining) > 5:
+            console.print(f"  ... and {len(remaining) - 5} more conversations")
+        return {"total": len(episodes), "ingested": 0, "skipped": len(episodes) - remaining_episodes, "errors": 0, "dry_run": True}
 
     client = await get_client(config)
-
     delay = config.get("episode_delay_seconds", 0.5)
-    checkpoint_interval = config.get("checkpoint_interval", 50)
 
-    stats = {"total": len(episodes), "ingested": 0, "skipped": start_index, "errors": 0}
-    failed_episodes = []
+    stats = {
+        "total": len(episodes),
+        "ingested": len(episodes) - remaining_episodes,
+        "skipped": len(episodes) - remaining_episodes,
+        "errors": 0,
+        "conversations_done": len(completed_convs),
+        "conversations_total": len(conv_groups),
+    }
+    failed_conversations = []
 
     try:
         with Progress(
@@ -93,47 +113,58 @@ async def _run_ingestion(
             MofNCompleteColumn(),
             console=console,
         ) as progress:
-            task = progress.add_task("Ingesting episodes", total=len(episodes) - start_index)
+            conv_task = progress.add_task("Conversations", total=len(remaining))
 
-            for i in range(start_index, len(episodes)):
-                ep = episodes[i]
-                try:
-                    await client.add_episode(
-                        name=f"turn_{ep.conversation_id}_{i}",
-                        episode_body=ep.content,
-                        reference_time=datetime.fromisoformat(
-                            ep.timestamp.replace("Z", "+00:00")
-                        ),
-                        source_description=f"Claude.ai conversation: {ep.conversation_title}",
-                        source=ep.source,
-                    )
-                    stats["ingested"] += 1
-                except Exception as exc:
-                    log.warning("Failed to ingest episode %d: %s", i, exc)
-                    stats["errors"] += 1
-                    failed_episodes.append({"index": i, "error": str(exc), **ep.to_dict()})
+            for conv_id, eps in remaining.items():
+                title = eps[0].conversation_title[:50]
+                progress.update(conv_task, description=f"[cyan]{title}[/cyan] ({len(eps)} turns)")
 
-                progress.advance(task)
+                conv_errors = 0
+                for i, ep in enumerate(eps):
+                    try:
+                        await client.add_episode(
+                            name=f"turn_{conv_id}_{i}",
+                            episode_body=ep.content,
+                            reference_time=datetime.fromisoformat(
+                                ep.timestamp.replace("Z", "+00:00")
+                            ),
+                            source_description=f"Claude.ai conversation: {ep.conversation_title}",
+                            source=EpisodeType.message,
+                            group_id=conv_id,
+                        )
+                        stats["ingested"] += 1
+                    except Exception as exc:
+                        log.warning("Failed episode %d in %s: %s", i, title, exc)
+                        stats["errors"] += 1
+                        conv_errors += 1
 
-                # Checkpoint
-                if (i - start_index + 1) % checkpoint_interval == 0:
-                    _save_checkpoint(export_path, i, stats)
+                    if delay > 0:
+                        await asyncio.sleep(delay)
 
-                # Rate limit
-                if delay > 0:
-                    time.sleep(delay)
+                if conv_errors == len(eps):
+                    # Entire conversation failed — log it
+                    failed_conversations.append({
+                        "conversation_id": conv_id,
+                        "title": eps[0].conversation_title,
+                        "episode_count": len(eps),
+                    })
+                else:
+                    # At least some episodes succeeded — mark conversation done
+                    completed_convs.add(conv_id)
+                    stats["conversations_done"] += 1
 
-        # Final checkpoint
-        _save_checkpoint(export_path, len(episodes) - 1, stats)
+                progress.advance(conv_task)
+                _save_checkpoint(export_path, completed_convs, stats)
+
+        _save_checkpoint(export_path, completed_convs, stats)
 
     finally:
         await client.close()
 
-    # Save failed episodes for retry
-    if failed_episodes:
+    if failed_conversations:
         fail_path = CHECKPOINT_DIR / f"{Path(export_path).stem}_failed.json"
-        fail_path.write_text(json.dumps(failed_episodes, indent=2))
-        console.print(f"[yellow]{len(failed_episodes)} failed episodes saved to {fail_path}[/yellow]")
+        fail_path.write_text(json.dumps(failed_conversations, indent=2))
+        console.print(f"[yellow]{len(failed_conversations)} failed conversations saved to {fail_path}[/yellow]")
 
     return stats
 
@@ -152,7 +183,11 @@ def main(export_path: str, resume: bool, after: str | None, dry_run: bool, confi
     stats = asyncio.run(_run_ingestion(export_path, resume=resume, after=after, dry_run=dry_run, config=config))
 
     console.print()
-    console.print(f"[green]Done.[/green] {stats['ingested']} ingested, {stats['errors']} errors, {stats['skipped']} skipped of {stats['total']} total")
+    console.print(
+        f"[green]Done.[/green] {stats['ingested']} ingested, {stats['errors']} errors, "
+        f"{stats['skipped']} skipped — "
+        f"{stats.get('conversations_done', '?')}/{stats.get('conversations_total', '?')} conversations"
+    )
 
 
 if __name__ == "__main__":

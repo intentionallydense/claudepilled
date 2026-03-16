@@ -1,8 +1,8 @@
-"""Memory plugin — Graphiti knowledge graph search as an LLM tool.
+"""Memory plugin — Graphiti knowledge graph search and forget as LLM tools.
 
-Registers a `memory_search` tool that lets models query the user's
-personal knowledge graph built from past conversations. Returns
-temporally-aware context from the Graphiti graph.
+Registers `memory_search` and `memory_forget` tools that let models query
+and remove entries from the user's personal knowledge graph built from
+past conversations.
 
 Requires Neo4j running and graphiti_memory configured.
 Gracefully degrades if Neo4j is unavailable.
@@ -66,7 +66,7 @@ class MemoryPlugin(WrapperPlugin):
                 "history and past conversations."
             )
         )
-        def memory_search(query: str) -> str:
+        async def memory_search(query: str) -> str:
             """
             Params:
                 query: What to search for in the knowledge graph (e.g., "coupled cluster theory", "RSD", "antibody project")
@@ -76,15 +76,7 @@ class MemoryPlugin(WrapperPlugin):
                 from src.graph import load_config
 
                 config = load_config(str(_GRAPHITI_DIR / "config.yaml"))
-                # Run the async retrieval in a new event loop
-                # (tool handlers are sync in the current ToolRegistry)
-                loop = asyncio.new_event_loop()
-                try:
-                    context = loop.run_until_complete(
-                        retrieve_context(query, config=config)
-                    )
-                finally:
-                    loop.close()
+                context = await retrieve_context(query, config=config)
 
                 if not context:
                     return json.dumps({"result": "No relevant memories found."})
@@ -94,8 +86,66 @@ class MemoryPlugin(WrapperPlugin):
                 log.warning("memory_search failed: %s", exc)
                 return json.dumps({"error": f"Memory search unavailable: {exc}"})
 
+        @registry.tool(
+            description=(
+                "Remove memories from the user's knowledge graph. Use this when "
+                "the user asks you to forget something, delete a memory, or remove "
+                "information from their memory store. Searches for matching episodes "
+                "and removes them. Be conservative — confirm what you're removing."
+            )
+        )
+        async def memory_forget(query: str) -> str:
+            """
+            Params:
+                query: What to forget / remove from the knowledge graph (e.g., "my old address", "the project we abandoned")
+            """
+            try:
+                from src.graph import get_client, load_config
+
+                config = load_config(str(_GRAPHITI_DIR / "config.yaml"))
+                client = await get_client(config)
+
+                try:
+                    # Search for matching episodes
+                    result = await client.search(query=query, num_results=10)
+
+                    episodes = getattr(result, "episodes", []) if not isinstance(result, list) else []
+
+                    if not episodes:
+                        return json.dumps({
+                            "result": "No matching memories found to remove."
+                        })
+
+                    # Remove each matching episode
+                    removed = []
+                    errors = []
+                    for ep in episodes:
+                        try:
+                            await client.remove_episode(ep.uuid)
+                            # Build a short description of what was removed
+                            body = getattr(ep, "content", "") or getattr(ep, "body", "") or str(ep.uuid)
+                            removed.append(body[:100])
+                        except Exception as exc:
+                            errors.append(str(exc))
+
+                    summary = {
+                        "removed_count": len(removed),
+                        "removed_previews": removed,
+                    }
+                    if errors:
+                        summary["errors"] = errors
+
+                    return json.dumps(summary)
+
+                finally:
+                    await client.close()
+
+            except Exception as exc:
+                log.warning("memory_forget failed: %s", exc)
+                return json.dumps({"error": f"Memory forget unavailable: {exc}"})
+
     def provides(self) -> list[str]:
-        return ["memory_search"]
+        return ["memory_search", "memory_forget"]
 
 
 plugin = MemoryPlugin()

@@ -95,6 +95,7 @@ async function loadSettings() {
     const settings = await res.json();
     if (settings.default_model) modelSelect.value = settings.default_model;
     if (settings.universal_prompt_id) universalPromptSelect.value = settings.universal_prompt_id;
+    document.getElementById("memory-auto-inject").checked = settings.memory_auto_inject === "true";
     // Seat suffix prompt IDs
     if (settings.backrooms_seat_1_suffix_id) suffixSelects[0].value = settings.backrooms_seat_1_suffix_id;
     if (settings.backrooms_seat_2_suffix_id) suffixSelects[1].value = settings.backrooms_seat_2_suffix_id;
@@ -111,6 +112,7 @@ async function saveSettings(e) {
         body: JSON.stringify({
             default_model: modelSelect.value,
             universal_prompt_id: universalPromptSelect.value,
+            memory_auto_inject: document.getElementById("memory-auto-inject").checked ? "true" : "false",
         }),
     });
     saveStatus.textContent = "saved";

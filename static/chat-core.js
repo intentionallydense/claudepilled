@@ -765,6 +765,25 @@ function createChatCore(config) {
                 }
                 break;
 
+            case "memory_context": {
+                const memEl = document.createElement("div");
+                memEl.className = "memory-context-indicator";
+                const toggle = document.createElement("span");
+                toggle.className = "memory-toggle";
+                toggle.textContent = "memory context injected";
+                toggle.onclick = () => {
+                    details.style.display = details.style.display === "none" ? "block" : "none";
+                };
+                const details = document.createElement("pre");
+                details.className = "memory-details";
+                details.style.display = "none";
+                details.textContent = event.context;
+                memEl.appendChild(toggle);
+                memEl.appendChild(details);
+                el.messages.appendChild(memEl);
+                break;
+            }
+
             case "compaction_done":
                 if (config.onCompactionDone) {
                     config.onCompactionDone(event);

@@ -3,12 +3,13 @@
 Manages the Graphiti client instance and Neo4j connection.
 All graph operations go through the client returned by get_client().
 
-Supports both Anthropic and Z.AI (OpenAI-compatible) LLM clients.
-Set extraction_model to a glm-* model to use Z.AI directly.
+Uses OpenAI models via OpenRouter for extraction, embeddings, and reranking.
+Local sentence-transformers embedder for vectors (OpenRouter doesn't proxy embeddings).
 """
 
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
 
@@ -20,14 +21,16 @@ from graphiti_core import Graphiti
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 load_dotenv(_PROJECT_ROOT / ".env")
 
+log = logging.getLogger(__name__)
 
 _DEFAULT_CONFIG = {
-    "extraction_model": "glm-5",
+    "extraction_model": "gpt-4.1-nano",
+    "small_model": "gpt-4.1-nano",
     "neo4j_uri": "bolt://localhost:7687",
     "neo4j_user": "neo4j",
     "neo4j_password": "",
-    "zai_api_key": "",
-    "zai_base_url": "https://api.z.ai/api/paas/v4",
+    "openrouter_api_key": "",
+    "openrouter_base_url": "https://openrouter.ai/api/v1",
 }
 
 
@@ -47,37 +50,55 @@ def load_config(config_path: str = "config.yaml") -> dict:
     config["neo4j_uri"] = os.environ.get(
         "NEO4J_URI", config.get("neo4j_uri", _DEFAULT_CONFIG["neo4j_uri"])
     )
-    config["zai_api_key"] = os.environ.get(
-        "ZAI_API_KEY", config.get("zai_api_key", "")
+    config["openrouter_api_key"] = os.environ.get(
+        "OPENROUTER_API_KEY", config.get("openrouter_api_key", "")
     )
 
     return config
 
 
 def _make_llm_client(config: dict):
-    """Create the appropriate LLM client based on model name."""
-    model = config["extraction_model"]
+    """Create an OpenAI client pointed at OpenRouter."""
+    from graphiti_core.llm_client import OpenAIClient
+    from graphiti_core.llm_client.config import LLMConfig
 
-    if model.startswith("glm"):
-        # Z.AI via OpenAI-compatible client
-        from graphiti_core.llm_client import OpenAIGenericClient
-        from graphiti_core.llm_client.config import LLMConfig
+    api_key = config["openrouter_api_key"]
+    if not api_key:
+        raise ValueError("OPENROUTER_API_KEY required")
 
-        api_key = config["zai_api_key"]
-        if not api_key:
-            raise ValueError("ZAI_API_KEY required for GLM models")
+    return OpenAIClient(
+        config=LLMConfig(
+            api_key=api_key,
+            model=config["extraction_model"],
+            small_model=config.get("small_model", "gpt-4.1-nano"),
+            base_url=config["openrouter_base_url"],
+        ),
+    )
 
-        return OpenAIGenericClient(
-            config=LLMConfig(
-                api_key=api_key,
-                model=model,
-                base_url=config["zai_base_url"],
-            ),
-        )
-    else:
-        # Anthropic
-        from graphiti_core.llm_client import AnthropicClient
-        return AnthropicClient(model=model)
+
+def _make_local_embedder():
+    """Create a local sentence-transformers embedder for Graphiti.
+    OpenRouter doesn't proxy embedding endpoints, so we run locally.
+    thenlper/gte-large produces 1024-dim vectors matching Graphiti's default."""
+    from graphiti_core.embedder.client import EmbedderClient
+    from sentence_transformers import SentenceTransformer
+
+    _model = SentenceTransformer("thenlper/gte-large")
+
+    class LocalEmbedder(EmbedderClient):
+        async def create(self, input_data):
+            if isinstance(input_data, str):
+                input_data = [input_data]
+            texts = [str(t)[:8000] for t in input_data]
+            embeddings = _model.encode(texts, normalize_embeddings=True)
+            return embeddings[0].tolist()
+
+        async def create_batch(self, input_data_list):
+            texts = [str(t)[:8000] for t in input_data_list]
+            embeddings = _model.encode(texts, normalize_embeddings=True)
+            return [e.tolist() for e in embeddings]
+
+    return LocalEmbedder()
 
 
 async def get_client(config: dict | None = None) -> Graphiti:
@@ -89,13 +110,29 @@ async def get_client(config: dict | None = None) -> Graphiti:
         config = load_config()
 
     llm_client = _make_llm_client(config)
+    embedder = _make_local_embedder()
 
-    client = Graphiti(
-        neo4j_uri=config["neo4j_uri"],
-        neo4j_user=config["neo4j_user"],
-        neo4j_password=config["neo4j_password"],
-        llm_client=llm_client,
+    # Reranker also goes through OpenRouter
+    from graphiti_core.cross_encoder.openai_reranker_client import OpenAIRerankerClient
+    from graphiti_core.llm_client.config import LLMConfig
+
+    cross_encoder = OpenAIRerankerClient(
+        config=LLMConfig(
+            api_key=config["openrouter_api_key"],
+            base_url=config["openrouter_base_url"],
+            model=config.get("small_model", "gpt-4.1-nano"),
+            small_model=config.get("small_model", "gpt-4.1-nano"),
+        ),
     )
 
-    await client.build_indices()
+    client = Graphiti(
+        uri=config["neo4j_uri"],
+        user=config["neo4j_user"],
+        password=config["neo4j_password"],
+        llm_client=llm_client,
+        embedder=embedder,
+        cross_encoder=cross_encoder,
+    )
+
+    await client.build_indices_and_constraints()
     return client

@@ -1365,6 +1365,34 @@ body {
 .message.compacted { opacity: 0.5; }
 .message.compacted:hover { opacity: 0.75; }
 
+/* Memory context indicator — clickable label with expandable details */
+.memory-context-indicator {
+    max-width: 640px;
+    width: 100%;
+    margin: 0.4rem 0;
+    padding: 0.25rem 0;
+}
+.memory-toggle {
+    font-size: 0.7rem;
+    color: #7c6ab5;
+    cursor: pointer;
+    user-select: none;
+}
+.memory-toggle::before { content: "\25B6  "; font-size: 0.55rem; }
+.memory-toggle:hover { color: #5a48a0; }
+.memory-details {
+    font-size: 0.7rem;
+    color: #666;
+    background: #f8f6ff;
+    border-left: 2px solid #c4b5e3;
+    padding: 0.5rem 0.75rem;
+    margin-top: 0.25rem;
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 200px;
+    overflow-y: auto;
+}
+
 /* Compaction divider — dashed line with expandable summary */
 .compaction-divider {
     max-width: 640px;

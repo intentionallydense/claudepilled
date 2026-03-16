@@ -15,6 +15,7 @@ dependencies = [
     "pyyaml",
     "rich",
     "python-dotenv",
+    "sentence-transformers",
 ]
 
 [project.optional-dependencies]
@@ -29,5 +30,7 @@ include = ["src*"]
 
 [project.scripts]
 memory-ingest = "src.ingest:main"
+memory-sync = "src.sync:main"
+memory-prune = "src.prune:main"
 memory-chat = "src.chat:main"
 memory-inspect = "src.inspect:main"
