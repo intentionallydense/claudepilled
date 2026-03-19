@@ -36,7 +36,8 @@ class BriefingPlugin(WrapperPlugin):
         from .routes import init, router, progress_router, anki_router
 
         task_db = self._ctx.service_registry.get("task_db")
-        init(self._db, task_db, self._ctx.llm_client, svc=self._ctx.service_registry)
+        init(self._db, task_db, self._ctx.llm_client,
+             svc=self._ctx.service_registry, get_setting=self._ctx.get_setting)
 
         # Combine all three sub-routers into one router mounted at /api
         combined = APIRouter()

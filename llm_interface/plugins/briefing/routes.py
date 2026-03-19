@@ -29,20 +29,25 @@ task_db: TaskDatabase | None = None
 client: ClaudeClient | None = None
 conversation_manager: ConversationManager | None = None
 _svc = None  # ServiceRegistry — lazy fallback for conversation_manager
+_get_setting = None  # Settings accessor from PluginContext
+
+# Default briefing chat model — overridden by briefing_chat_model setting
+_DEFAULT_BRIEFING_MODEL = "claude-sonnet-4-6"
 
 
 def init(bdb: BriefingDatabase, tdb: TaskDatabase = None, client_ref: ClaudeClient = None,
-         mgr: ConversationManager = None, svc=None) -> None:
+         mgr: ConversationManager = None, svc=None, get_setting=None) -> None:
     """Called by plugin on_load or server.py to inject dependencies.
 
     mgr (ConversationManager) may be None at plugin load time — route
     handlers that need it will fall back to the service registry.
     """
-    global briefing_db, task_db, client, conversation_manager, _svc
+    global briefing_db, task_db, client, conversation_manager, _svc, _get_setting
     briefing_db = bdb
     task_db = tdb
     client = client_ref
     conversation_manager = mgr
+    _get_setting = get_setting
     _svc = svc
 
 
@@ -101,10 +106,18 @@ async def get_or_create_chat(date_str: str):
     if mgr is None:
         return JSONResponse(status_code=503, content={"error": "ConversationManager not available"})
 
+    # Resolve briefing chat model: setting > default (Sonnet 4.6)
+    model = _DEFAULT_BRIEFING_MODEL
+    if _get_setting:
+        custom = _get_setting("briefing_chat_model")
+        if custom:
+            model = custom
+
     # Create new conversation with briefing text as system prompt
     conv = mgr.create_conversation(
         title=f"Briefing chat — {date_str}",
         system_prompt=briefing["assembled_text"],
+        model=model,
     )
     briefing_db.set_chat_conversation_id(date_str, conv.id)
     return {"conversation_id": conv.id}

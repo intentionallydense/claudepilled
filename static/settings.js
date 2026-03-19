@@ -8,6 +8,7 @@
 // DOM elements
 // ---------------------------------------------------------------------------
 const modelSelect = document.getElementById("default-model");
+const briefingModelSelect = document.getElementById("briefing-model");
 const universalPromptSelect = document.getElementById("universal-prompt-select");
 const form = document.getElementById("settings-form");
 const saveStatus = document.getElementById("save-status");
@@ -53,6 +54,25 @@ async function loadModels() {
         }
         modelSelect.appendChild(optgroup);
     }
+    // Also populate briefing model select (same options)
+    if (briefingModelSelect) {
+        briefingModelSelect.innerHTML = "";
+        const defOpt = document.createElement("option");
+        defOpt.value = "";
+        defOpt.textContent = "(default: Sonnet 4.6)";
+        briefingModelSelect.appendChild(defOpt);
+        for (const [provider, group] of Object.entries(byProvider)) {
+            const og = document.createElement("optgroup");
+            og.label = provider.charAt(0).toUpperCase() + provider.slice(1);
+            for (const m of group) {
+                const opt = document.createElement("option");
+                opt.value = m.id;
+                opt.textContent = `${m.name} ($${m.input_cost}/$${m.output_cost})`;
+                og.appendChild(opt);
+            }
+            briefingModelSelect.appendChild(og);
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -94,6 +114,7 @@ async function loadSettings() {
     const res = await fetch("/api/settings");
     const settings = await res.json();
     if (settings.default_model) modelSelect.value = settings.default_model;
+    if (settings.briefing_chat_model && briefingModelSelect) briefingModelSelect.value = settings.briefing_chat_model;
     if (settings.universal_prompt_id) universalPromptSelect.value = settings.universal_prompt_id;
     document.getElementById("memory-auto-inject").checked = settings.memory_auto_inject === "true";
     // Seat suffix prompt IDs
@@ -111,6 +132,7 @@ async function saveSettings(e) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
             default_model: modelSelect.value,
+            briefing_chat_model: briefingModelSelect ? briefingModelSelect.value : "",
             universal_prompt_id: universalPromptSelect.value,
             memory_auto_inject: document.getElementById("memory-auto-inject").checked ? "true" : "false",
         }),

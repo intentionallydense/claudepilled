@@ -802,6 +802,9 @@
     .tag-search-input,
     .annotate-form input { font-size: 16px; }
 
+    /* Match other pages: room for hamburger, less horizontal padding */
+    .app-tasks .page-content { padding: 3rem 1rem 1rem; }
+
     /* Larger touch targets */
     .filter-btn { padding: 0.4rem 0.65rem; }
     .tasks-toolbar .btn-dark { padding: 0.5rem 1rem; }
