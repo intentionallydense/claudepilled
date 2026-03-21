@@ -789,7 +789,7 @@
 /* Mobile overrides                                                   */
 /* ------------------------------------------------------------------ */
 @media (max-width: 768px) {
-    .app-tasks {
+    #app.app-tasks {
         grid-template-columns: 1fr;
     }
     .agenda-panel {
