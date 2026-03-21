@@ -81,9 +81,6 @@ class ConversationManager:
         self.db = db or Database()
         self.context_sources = context_sources or []
         self._openrouter_client = None  # lazy-init AsyncOpenAI for system tasks
-        # Per-turn memory context injected by server.py before stream_chat.
-        # Keyed by conversation_id, cleared after the system prompt is built.
-        self._memory_context: dict[str, str] = {}
 
     def _get_client_and_tools(self, model: str):
         """Return (client, tool_defs, is_anthropic) for the given model.
@@ -758,20 +755,6 @@ class ConversationManager:
         files_block = self._build_injected_files_block(conv.id)
         if files_block:
             layers.append(files_block)
-
-        # Memory layer — auto-injected context from the knowledge graph.
-        # Set by server.py before stream_chat, consumed once then cleared
-        # so stale context doesn't linger across turns.
-        memory_ctx = self._memory_context.pop(conv.id, None)
-        if memory_ctx:
-            layers.append(
-                "<memory_context>\n"
-                "The following is relevant context retrieved from the user's "
-                "past conversations. Use it naturally — don't announce that "
-                "you're remembering things unless relevant.\n\n"
-                f"{memory_ctx}\n"
-                "</memory_context>"
-            )
 
         # Substitute {self_label} with the model's display name so chat
         # prompts can reference the model naturally (backrooms does this

@@ -8,6 +8,5 @@ build/
 .DS_Store
 .claude/
 *-spec.md
-graphiti_memory/data/checkpoints/
-graphiti_memory/data/exports/
 .pytest_cache/
+data-*/
