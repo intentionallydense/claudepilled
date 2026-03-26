@@ -15,6 +15,7 @@ dependencies = [
     "python-dotenv>=1.0.0",
     "pydantic>=2.0.0",
     "websockets>=13.0",
+    "briefing>=0.1.0",
     "python-multipart>=0.0.12",
     "pymupdf>=1.25.0",
     "google-auth>=2.0.0",

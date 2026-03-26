@@ -1,13 +1,9 @@
-"""Reads daily briefings assembled by the standalone briefing project.
+"""Briefing assembly — delegates to the standalone `briefing` package.
 
-The standalone project handles feed fetching, reading list management,
-LLM assembly, and writes markdown files to ~/.briefing/briefings/YYYY-MM-DD.md.
-This module just reads those files and stores them in the wrapper's DB
-for the UI to serve.
-
-If the standalone project hasn't assembled today's briefing, the
-/api/briefing/assemble endpoint will shell out to `briefing assemble`
-to trigger it.
+The standalone `briefing` package handles all data gathering (RSS feeds,
+reading lists, Wikipedia, Anki), LLM/template rendering, and file output.
+This module calls its Python API directly, then copies the result into the
+wrapper's own DB so the UI can serve it.
 
 Called by the cron CLI (cli_main) or /api/briefing/assemble endpoint.
 """
@@ -15,69 +11,65 @@ Called by the cron CLI (cli_main) or /api/briefing/assemble endpoint.
 from __future__ import annotations
 
 import logging
-import subprocess
 from datetime import date
-from pathlib import Path
 
-from .db import BriefingDatabase
+from .db import BriefingDatabase as WrapperBriefingDB
 
 log = logging.getLogger(__name__)
 
-# Where the standalone briefing project writes its output
-_BRIEFING_DIR = Path.home() / ".briefing" / "briefings"
-
 
 def assemble_briefing(
-    briefing_db: BriefingDatabase,
+    wrapper_db: WrapperBriefingDB,
     force: bool = False,
 ) -> dict:
-    """Read today's briefing from the standalone project, store in wrapper DB.
+    """Run the standalone briefing assembler and import the result.
 
-    If the .md file doesn't exist yet, shells out to `briefing assemble`
-    to trigger the standalone assembler.
+    Calls briefing.assembly.assemble_briefing() which gathers data,
+    renders markdown, writes to ~/.briefing/briefings/{date}.md, and
+    updates the standalone DB. We then read the output and store it in
+    the wrapper's DB for the UI to serve.
     """
     today = date.today().isoformat()
 
     if not force:
-        existing = briefing_db.get_briefing_by_date(today)
+        existing = wrapper_db.get_briefing_by_date(today)
         if existing is not None:
             return existing
 
-    md_path = _BRIEFING_DIR / f"{today}.md"
+    # Import and run the standalone assembler
+    from briefing.config import load_config
+    from briefing.assembly import assemble_briefing as standalone_assemble
+    from briefing.db import BriefingDatabase as StandaloneBriefingDB
 
-    # If no file yet, try to trigger the standalone assembler
-    if not md_path.exists():
-        log.info("No briefing file at %s — running 'briefing assemble'", md_path)
-        try:
-            subprocess.run(
-                ["briefing", "assemble"],
-                check=True,
-                timeout=120,
-                capture_output=True,
-            )
-        except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired) as e:
-            log.warning("Failed to run standalone briefing assembler: %s", e)
+    config = load_config()
+    standalone_db = StandaloneBriefingDB(str(config.state_dir / "state.db"))
 
-    # Read the file (may now exist after the subprocess call)
-    if md_path.exists():
-        assembled_text = md_path.read_text(encoding="utf-8")
-        model = "standalone"
-    else:
-        assembled_text = f"## Good morning\n\nNo briefing available for {today}.\n\nRun `briefing assemble` to generate one."
-        model = "none"
+    try:
+        output_path = standalone_assemble(standalone_db, config, force=True)
+        assembled_text = output_path.read_text(encoding="utf-8")
 
-    return briefing_db.save_briefing(today, {}, assembled_text, model=model)
+        # Check which model was used from the standalone DB
+        standalone_record = standalone_db.get_briefing_by_date(today)
+        model = standalone_record.get("model", "unknown") if standalone_record else "unknown"
+
+    except Exception as e:
+        log.warning("Standalone briefing assembly failed: %s", e)
+        assembled_text = (
+            f"## Good morning\n\n"
+            f"Briefing assembly failed for {today}.\n\n"
+            f"Error: {e}"
+        )
+        model = "error"
+
+    return wrapper_db.save_briefing(today, {}, assembled_text, model=model)
 
 
 def cli_main() -> None:
-    """CLI entry point: read today's briefing and print it.
-
-    Triggers standalone assembly if needed.
-    """
+    """CLI entry point: assemble today's briefing and print it."""
     from llm_interface.db import Database
 
     db = Database()
-    briefing_db = BriefingDatabase(db.db_path)
+    wrapper_db = WrapperBriefingDB(db.db_path)
 
-    result = assemble_briefing(briefing_db, force=True)
+    result = assemble_briefing(wrapper_db, force=True)
     print(result["assembled_text"])
