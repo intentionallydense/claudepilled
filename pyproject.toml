@@ -15,7 +15,6 @@ dependencies = [
     "python-dotenv>=1.0.0",
     "pydantic>=2.0.0",
     "websockets>=13.0",
-    "feedparser>=6.0.0",
     "python-multipart>=0.0.12",
     "pymupdf>=1.25.0",
     "google-auth>=2.0.0",
@@ -36,5 +35,5 @@ include = ["llm_interface*"]
 
 [project.scripts]
 llm-interface = "llm_interface.server:main"
-llm-interface-briefing = "llm_interface.briefing_assembly:cli_main"
+llm-interface-briefing = "llm_interface.plugins.briefing.assembly:cli_main"
 llm-interface-email = "llm_interface.email_ingestion:cli_main"

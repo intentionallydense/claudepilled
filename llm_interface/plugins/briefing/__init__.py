@@ -1,8 +1,9 @@
-"""Briefing plugin — daily briefing assembly from RSS, reading lists, and calendar.
+"""Briefing plugin — reads daily briefings from the standalone briefing project.
 
-Provides briefing CRUD, reading progress tracking, Anki stats proxy,
-assembly pipeline, and briefing chat conversations.
-Consumes task services from the tasks plugin.
+The standalone project (github.com/anthropics/briefing) handles feed
+fetching, reading list management, and LLM assembly. This plugin reads
+the resulting .md files and serves them via the web UI, with a chat
+interface and reading progress proxy.
 """
 
 from llm_interface.plugin_protocol import (
@@ -14,7 +15,7 @@ from llm_interface.plugin_protocol import (
 
 
 class BriefingPlugin(WrapperPlugin):
-    """Plugin for daily briefing assembly and delivery."""
+    """Plugin for daily briefing delivery and chat."""
 
     name = "briefing"
 
@@ -28,16 +29,12 @@ class BriefingPlugin(WrapperPlugin):
 
     def on_load(self, ctx: PluginContext) -> None:
         self._ctx = ctx
-        from .sequential import init_all_series
-        init_all_series(self._db)
 
     def routes(self):
         from fastapi import APIRouter
         from .routes import init, router, progress_router, anki_router
 
-        task_db = self._ctx.service_registry.get("task_db")
-        init(self._db, task_db, self._ctx.llm_client,
-             svc=self._ctx.service_registry, get_setting=self._ctx.get_setting)
+        init(self._db, svc=self._ctx.service_registry, get_setting=self._ctx.get_setting)
 
         # Combine all three sub-routers into one router mounted at /api
         combined = APIRouter()
@@ -58,7 +55,7 @@ class BriefingPlugin(WrapperPlugin):
         return ["briefing_db"]
 
     def consumes(self) -> list[str]:
-        return ["task_db"]
+        return []
 
     def cli_commands(self) -> dict:
         from .assembly import cli_main

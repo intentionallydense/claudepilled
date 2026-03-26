@@ -5,16 +5,14 @@ from __future__ import annotations
 import asyncio
 import importlib.util
 import json
-import logging
 import os
-import sys
 import uuid
 from collections.abc import AsyncGenerator
 from pathlib import Path
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -22,7 +20,7 @@ from llm_interface.client import ClaudeClient
 from llm_interface.conversation import ConversationManager
 from llm_interface.backrooms import BackroomsOrchestrator
 from llm_interface.db import Database
-from llm_interface.models import AVAILABLE_MODELS, StreamEventType, get_available_models, get_available_providers
+from llm_interface.models import StreamEventType, get_available_models, get_available_providers
 from llm_interface.plugin_loader import load_plugins
 from llm_interface.service_registry import ServiceRegistry
 from llm_interface.plugins.tasks.tools import BRAIN_DUMP_PROMPT
@@ -560,8 +558,6 @@ async def briefing_page():
 # ---------------------------------------------------------------------------
 # Backrooms page redirect (legacy /couch URL)
 # ---------------------------------------------------------------------------
-
-from fastapi.responses import RedirectResponse
 
 @app.get("/couch")
 async def couch_redirect():

@@ -4,12 +4,17 @@ Three sub-routers: briefing (assembly + retrieval), reading progress
 (series management), and anki (stats proxy). The plugin __init__.py
 combines them into a single router mounted at /api.
 
-Follows the module-level state + init() pattern from the tasks plugin.
+The briefing content itself comes from the standalone briefing project
+(~/.briefing/briefings/*.md). This module just reads/serves it and
+manages the chat-to-briefing link. Reading progress queries proxy
+to the standalone project's DB at ~/.briefing/state.db.
 """
 
 from __future__ import annotations
 
+import sqlite3
 from datetime import date
+from pathlib import Path
 
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
@@ -17,17 +22,14 @@ from fastapi.responses import JSONResponse
 from .anki import get_anki_stats
 from .assembly import assemble_briefing
 from .db import BriefingDatabase
-from llm_interface.client import ClaudeClient
-from llm_interface.conversation import ConversationManager
-from llm_interface.task_db import TaskDatabase
+
+# Standalone briefing project's DB — reading progress lives here
+_STANDALONE_DB = Path.home() / ".briefing" / "state.db"
 
 # ------------------------------------------------------------------
 # Module-level state — set during server startup via init()
 # ------------------------------------------------------------------
 briefing_db: BriefingDatabase | None = None
-task_db: TaskDatabase | None = None
-client: ClaudeClient | None = None
-conversation_manager: ConversationManager | None = None
 _svc = None  # ServiceRegistry — lazy fallback for conversation_manager
 _get_setting = None  # Settings accessor from PluginContext
 
@@ -35,20 +37,12 @@ _get_setting = None  # Settings accessor from PluginContext
 _DEFAULT_BRIEFING_MODEL = "claude-sonnet-4-6"
 
 
-def init(bdb: BriefingDatabase, tdb: TaskDatabase = None, client_ref: ClaudeClient = None,
-         mgr: ConversationManager = None, svc=None, get_setting=None) -> None:
-    """Called by plugin on_load or server.py to inject dependencies.
-
-    mgr (ConversationManager) may be None at plugin load time — route
-    handlers that need it will fall back to the service registry.
-    """
-    global briefing_db, task_db, client, conversation_manager, _svc, _get_setting
+def init(bdb: BriefingDatabase, svc=None, get_setting=None) -> None:
+    """Called by plugin on_load to inject dependencies."""
+    global briefing_db, _svc, _get_setting
     briefing_db = bdb
-    task_db = tdb
-    client = client_ref
-    conversation_manager = mgr
-    _get_setting = get_setting
     _svc = svc
+    _get_setting = get_setting
 
 
 # ------------------------------------------------------------------
@@ -84,8 +78,8 @@ async def get_briefing_by_date(date_str: str):
 
 @router.post("/assemble")
 async def assemble():
-    """Assemble today's briefing. Idempotent unless force=true query param."""
-    result = assemble_briefing(briefing_db, task_db, client, force=True)
+    """Import today's briefing from the standalone project. Triggers assembly if needed."""
+    result = assemble_briefing(briefing_db, force=True)
     return result
 
 
@@ -101,8 +95,8 @@ async def get_or_create_chat(date_str: str):
     if existing_id:
         return {"conversation_id": existing_id}
 
-    # Resolve ConversationManager: direct ref first, service registry fallback
-    mgr = conversation_manager or (_svc.get("conversation_manager") if _svc else None)
+    # Resolve ConversationManager from service registry
+    mgr = _svc.get("conversation_manager") if _svc else None
     if mgr is None:
         return JSONResponse(status_code=503, content={"error": "ConversationManager not available"})
 
@@ -125,47 +119,81 @@ async def get_or_create_chat(date_str: str):
 
 # ------------------------------------------------------------------
 # Reading progress router (no prefix — plugin adds /reading-progress)
+# Proxies to the standalone briefing project's DB so the UI shows
+# the same state as `briefing progress` on the command line.
 # ------------------------------------------------------------------
 progress_router = APIRouter(tags=["reading-progress"])
 
 
+def _standalone_conn() -> sqlite3.Connection | None:
+    """Open a connection to the standalone briefing DB, or None if it doesn't exist."""
+    if not _STANDALONE_DB.exists():
+        return None
+    conn = sqlite3.connect(str(_STANDALONE_DB))
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
 @progress_router.get("")
 async def get_all_progress():
-    """Get reading progress for all series."""
-    return briefing_db.get_all_progress()
+    """Get reading progress for all series from the standalone briefing DB."""
+    conn = _standalone_conn()
+    if conn is None:
+        return []
+    try:
+        rows = conn.execute(
+            "SELECT series, current_index, list_path, last_advanced, paused "
+            "FROM reading_progress ORDER BY series"
+        ).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
 
 
 @progress_router.post("/{series}/pause")
 async def pause_series(series: str):
-    result = briefing_db.set_paused(series, True)
-    if result is None:
-        return JSONResponse(status_code=404, content={"error": "Unknown series"})
-    return result
+    return _update_standalone_progress(series, "UPDATE reading_progress SET paused = 1 WHERE series = ?")
 
 
 @progress_router.post("/{series}/resume")
 async def resume_series(series: str):
-    result = briefing_db.set_paused(series, False)
-    if result is None:
-        return JSONResponse(status_code=404, content={"error": "Unknown series"})
-    return result
+    return _update_standalone_progress(series, "UPDATE reading_progress SET paused = 0 WHERE series = ?")
 
 
 @progress_router.post("/{series}/skip")
 async def skip_series_item(series: str):
-    result = briefing_db.skip_item(series)
-    if result is None:
-        return JSONResponse(status_code=404, content={"error": "Unknown series"})
-    return result
+    return _update_standalone_progress(
+        series, "UPDATE reading_progress SET current_index = current_index + 1 WHERE series = ?"
+    )
 
 
 @progress_router.post("/{series}/unread")
 async def mark_series_unread(series: str):
-    """Mark current item as not read — it will re-appear tomorrow."""
-    result = briefing_db.mark_unread(series)
-    if result is None:
-        return JSONResponse(status_code=404, content={"error": "Unknown series"})
-    return result
+    """Mark current item as not read — rewind pointer by 1."""
+    return _update_standalone_progress(
+        series,
+        "UPDATE reading_progress SET current_index = MAX(0, current_index - 1) WHERE series = ?",
+    )
+
+
+def _update_standalone_progress(series: str, sql: str) -> dict | JSONResponse:
+    """Run an update on the standalone DB and return the updated row."""
+    conn = _standalone_conn()
+    if conn is None:
+        return JSONResponse(status_code=404, content={"error": "Standalone briefing DB not found"})
+    try:
+        cursor = conn.execute(sql, (series,))
+        conn.commit()
+        if cursor.rowcount == 0:
+            return JSONResponse(status_code=404, content={"error": "Unknown series"})
+        row = conn.execute(
+            "SELECT series, current_index, list_path, last_advanced, paused "
+            "FROM reading_progress WHERE series = ?",
+            (series,),
+        ).fetchone()
+        return dict(row)
+    finally:
+        conn.close()
 
 
 # ------------------------------------------------------------------

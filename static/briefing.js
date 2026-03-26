@@ -362,6 +362,7 @@ const SERIES_NAMES = {
     gwern: "Gwern Essays",
     acx: "ACX/SSC Best Of",
     albums: "Album of the Day",
+    ml_fundamentals: "ML Fundamentals",
 };
 
 async function loadProgress() {
