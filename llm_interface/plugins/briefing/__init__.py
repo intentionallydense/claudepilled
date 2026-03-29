@@ -57,6 +57,22 @@ class BriefingPlugin(WrapperPlugin):
     def consumes(self) -> list[str]:
         return []
 
+    def cron_jobs(self) -> list[dict]:
+        from .assembly import assemble_briefing
+
+        def _daily_assemble():
+            """Assemble today's briefing if not already done."""
+            if self._db is not None:
+                assemble_briefing(self._db, force=False)
+
+        return [{
+            "name": "briefing_assemble",
+            "fn": _daily_assemble,
+            # Check every 30 minutes; idempotent so it only assembles once per day
+            "interval_seconds": 30 * 60,
+            "run_on_start": True,
+        }]
+
     def cli_commands(self) -> dict:
         from .assembly import cli_main
         return {"briefing": cli_main}

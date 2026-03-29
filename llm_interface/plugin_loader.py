@@ -2,13 +2,15 @@
 
 Scans llm_interface/plugins/ for Python packages that export a `plugin`
 attribute (a WrapperPlugin instance). Loads them in dependency order
-based on provides()/consumes() declarations.
+based on provides()/consumes() declarations. Also starts background
+cron jobs declared by plugins.
 
 Called by server.py during startup.
 """
 
 from __future__ import annotations
 
+import asyncio
 import importlib
 import logging
 from pathlib import Path
@@ -18,6 +20,9 @@ from llm_interface.plugin_protocol import PluginContext, WrapperPlugin
 from llm_interface.service_registry import ServiceRegistry
 
 logger = logging.getLogger(__name__)
+
+# Active cron tasks — kept alive for the process lifetime
+_cron_tasks: list[asyncio.Task] = []
 
 _PLUGINS_DIR = Path(__file__).resolve().parent / "plugins"
 
@@ -146,4 +151,52 @@ def load_plugins(
             if refresher is not None:
                 tool_registry.add_refresher(refresher)
 
+    # 6. Start cron jobs from all plugins
+    _start_cron_jobs(plugins)
+
     return plugins
+
+
+def _start_cron_jobs(plugins: list[WrapperPlugin]) -> None:
+    """Collect cron_jobs() from all plugins and start asyncio background tasks."""
+    for plugin in plugins:
+        for job in plugin.cron_jobs():
+            name = job.get("name", f"{plugin.name}_cron")
+            fn = job["fn"]
+            interval = job["interval_seconds"]
+            run_on_start = job.get("run_on_start", False)
+
+            task = asyncio.create_task(
+                _run_cron(name, fn, interval, run_on_start),
+                name=f"cron:{name}",
+            )
+            _cron_tasks.append(task)
+            logger.info("Started cron job: %s (every %ds)", name, interval)
+
+
+async def _run_cron(name: str, fn, interval: int, run_on_start: bool) -> None:
+    """Run a function on a fixed interval.
+
+    Sync functions are run in the default thread executor to avoid blocking
+    the event loop (important since cron jobs may do network I/O like LLM calls).
+    """
+    loop = asyncio.get_running_loop()
+
+    async def _invoke():
+        if asyncio.iscoroutinefunction(fn):
+            await fn()
+        else:
+            await loop.run_in_executor(None, fn)
+
+    if run_on_start:
+        try:
+            await _invoke()
+        except Exception:
+            logger.exception("Cron job %s failed on startup run", name)
+
+    while True:
+        await asyncio.sleep(interval)
+        try:
+            await _invoke()
+        except Exception:
+            logger.exception("Cron job %s failed", name)

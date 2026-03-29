@@ -40,17 +40,23 @@ def assemble_briefing(
     from briefing.config import load_config
     from briefing.assembly import assemble_briefing as standalone_assemble
     from briefing.db import BriefingDatabase as StandaloneBriefingDB
+    from briefing.sequential import init_all_series
 
     config = load_config()
     standalone_db = StandaloneBriefingDB(str(config.state_dir / "state.db"))
+
+    # Seed reading progress DB for all configured sequences (idempotent).
+    # Without this, get_todays_item() returns None for every sequence.
+    init_all_series(config.sequences, standalone_db)
 
     try:
         output_path = standalone_assemble(standalone_db, config, force=True)
         assembled_text = output_path.read_text(encoding="utf-8")
 
-        # Check which model was used from the standalone DB
+        # Pull sections and model from the standalone DB
         standalone_record = standalone_db.get_briefing_by_date(today)
         model = standalone_record.get("model", "unknown") if standalone_record else "unknown"
+        sections = standalone_record.get("sections", {}) if standalone_record else {}
 
     except Exception as e:
         log.warning("Standalone briefing assembly failed: %s", e)
@@ -60,8 +66,9 @@ def assemble_briefing(
             f"Error: {e}"
         )
         model = "error"
+        sections = {}
 
-    return wrapper_db.save_briefing(today, {}, assembled_text, model=model)
+    return wrapper_db.save_briefing(today, sections, assembled_text, model=model)
 
 
 def cli_main() -> None:
